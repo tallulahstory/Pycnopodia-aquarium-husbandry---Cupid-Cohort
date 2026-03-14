@@ -1,0 +1,1736 @@
+---
+title: "Cleaned Cupid Cohort Analysis"
+author: "Tallulah Story"
+date: "2026-02-08"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+This code was authored originally by LTS from 6/2/2025-8/1/2025. The "cleaned" version of this code used for publication anlysis and visualization was completed from 2/8/2026-2/20/2026. Both versions are available via ... Data is also available via ...
+
+## Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Packages Used
+library(tidyverse)
+library(lubridate)        #Formatting dates and times (tidyverse add-on)
+library(ggplot2)          #plotting vehicle
+library(patchwork)        #Combining ggplots
+library(ggtext)           #Additional plot aesthetics
+library(ggthemes)         #Additional ggplot themes
+library(ggpubr)           #Plots containing statistical information
+library(pastecs)          #For descriptive statistics relating to time-series data
+library(car)              #Testing assumptions for statistical analysis
+library(rstatix)          #Pipe-friendly statistical analysis/post-hoc testing
+library(mgcv)             #Mixed GAMM computational vehicle
+library(MASS)             #For mvnorm in simulated GAM
+library(marginaleffects)  #Compute and plot_predictions from models
+library(fastDummies)      #Dummy variable coding for SLR/MLR
+
+```
+
+## Data import
+
+```{r data import}
+## Fitness data set (experiments from 2/13/25 to 2/25/25)
+fitness <- read.csv("Fitness Test.csv")
+
+## Growth data (from measurements and counts taken 12/31/24 to 1/2/25)
+growth <- read.csv("Growth Cruves Dec to Feb.csv") #wide format data
+growth_combined <- read.csv("growth curves 2.csv") #long format data
+
+## Settlement data (from settlement counts 3/26/24 to 7/9/24)
+settlement_raw_wide <- read.csv("Settlement raw counts wide.csv")
+settlement_raw_long <- read.csv ("Settlement raw count long.csv")
+survivorship <- read.csv("Settlement total counts.csv")
+settlement_cohort <- read.csv("Settlement cupid cohort.csv")
+juvenile_settlement <- read.csv("Juvenile settlment survival.csv")
+
+## Specimen Measurements (from Measurements done on 7/7/2025 to 7/9/2025)
+specimens <- read.csv("Pycnopodia specimen measurements.csv")
+specimens_alive <- read.csv("Pycnopodia specimen measurements - Live Stars.csv")
+
+## Larval growth data collected from ImageJ measurements taken of larvae DPF 4-47
+larval_growth <- read.csv("Larval Growth Curves.csv")
+```
+
+## Data Cleaning, fixing date and time data with lubridate
+
+```{r lubridate}
+#growth data
+growth$Measurement_date_1 <- mdy(growth$Measurement_date_1) #jan sampling
+class(growth$Measurement_date_1) #check it worked, output should be "Date"
+
+growth$Measurement_date_2 <- mdy(growth$Measurement_date_2) #repeat for Feb sampling
+class(growth$Measurement_date_2) 
+
+#fitness data
+fitness$Flip_time_seconds <- period_to_seconds(hms(fitness$Flip_time)) #time as seconds vs hms
+fitness$Flip_time <- hms(fitness$Flip_time)
+fitness$Flip_time <- hms::hms(fitness$Flip_time) #time as hours, mins, seconds
+class(fitness$Flip_time) #should be hms, difftime
+
+#settlement data
+settlement_raw_wide$Date <- mdy(settlement_raw_wide$Date) 
+class(settlement_raw_wide$Date) 
+settlement_raw_long$Date <- mdy(settlement_raw_long$Date)
+class(settlement_raw_long$Date)
+
+#specimen data
+specimens$Date_measured <- mdy(specimens$Date_measured)
+class(specimens$Date_measured)
+```
+
+
+```{r recoding density}
+fitness$Density <- factor(
+  fitness$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+settlement_raw_long$Density <- factor(
+  settlement_raw_long$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+survivorship$Density <- factor(
+  survivorship$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+juvenile_settlement$Density <- factor(
+  juvenile_settlement$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 Larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+```
+
+## Larval growth overtime from ImageJ photo meansurements
+
+```{r plotting}
+par(mfrow = c(1,1))
+
+#first pass visualization
+plot(data = larval_growth, Size ~ DPF)
+
+#ordering densities
+larval_growth$Density <- 
+  factor(larval_growth$Density, levels = c("1 larvae/mL",
+                                           "2 larvae/mL",
+                                           "5 larvae/mL",
+                                           "15-20 larvae/mL"))
+
+#working df
+Larval_growth <- larval_growth %>% arrange(desc(Density)) %>%
+  group_by(DPF, Density) %>%
+  summarise(mean_size = mean(Size))
+
+#first pass plot
+ggplot(Larval_growth, aes(x = DPF, y = mean_size, colour = Density)) +
+  geom_point() +
+  geom_line() +
+  labs(y= "Average size (µm)", x = "Days post fertilization (DPF)") +
+  theme_bw()
+#day 42 is an extreme outlier, given each group sees dramatic decreases in average size
+
+#exclude day 42, plot
+Figure_2 <- Larval_growth %>% filter(!DPF == 42) %>%
+  ggplot(aes(x = DPF, y = mean_size, colour = Density)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  labs(y= "Average size (µm)", x = "Days post fertilization (DPF)",
+       colour = "Larval Density") +
+  xlim(0,50) +
+  theme_bw() +
+  theme(legend.position = 'top')
+
+ggsave('Figure 2.png', Figure_2, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+```
+
+
+## Larval settlement data 
+
+```{r cumulative settlement plotting}
+#cumulative settlement by larval density 
+Density_settlement <- settlement_raw_long %>% 
+  group_by(Density, DPF) %>% #initially group by DPF and density
+  summarise(Settlers = sum(Settlers)) %>% #sum the settler count by day for each density
+  arrange(Density, DPF) %>% #arrange df by density and DPF
+  group_by(Density) %>% #cumulative sum only by density 
+  mutate(Cum_sum = cumsum(Settlers)) #cumulative sum by density group over-time
+
+#line plot of culuative settlement over DPF, NOT NORMALIZED
+ggplot(Density_settlement, aes(x = DPF, y = Cum_sum, colour = Density)) +
+  geom_line(linewidth = 0.7) +
+  labs(x = "Days post fertilization (DPF)",y = "Approximate larval settlers", 
+       colour = "Larval density") +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = 'top')
+
+#cum settlement by density normalized according to # of replicates in density groups
+replicate_counts <- c("1 larvae/mL" = 8, #replicates in each density trtment
+                      "2 larvae/mL" = 4, 
+                      "5 larvae/mL" = 4, 
+                      "15-20 larvae/mL" = 4)
+
+#normalized daily settlement cum df
+Density_settlement_normalized <- settlement_raw_long %>%
+  group_by(Density, DPF) %>% #summarize by density and DPF
+  summarise(Daily_settlers = sum(Settlers), .groups = "drop") %>% #sum by daily settlers
+  arrange(Density, DPF) %>% #rearrange df
+  group_by(Density) %>% #calculate and mutate by density groups
+  mutate(Cum_sum = cumsum(Daily_settlers),
+    Normalized_cum_sum = Cum_sum / replicate_counts[Density]) #divide cumsum by # replicates
+
+#normalized cumulative settlement over DPF, plot
+Figure_4a <- ggplot(Density_settlement_normalized, 
+       aes(x = DPF, y = Normalized_cum_sum, colour = Density)) +
+  geom_line(linewidth = 0.7) +
+  labs(x = "Days post fertilization (DPF)", 
+       y = "Cumulative daily settlement",
+       colour = "Larval density", subtitle = "(A)") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_bw() +
+  theme(legend.position = 'none')
+
+ggsave('Figure 4a.png', Figure_4a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+```
+
+```{r GAM non normalized}
+Settlement_dpf <- settlement_raw_long %>%
+  mutate(Density = as.factor(Density),
+         Group = as.factor(Group),
+         Settlers = as.integer(Settlers), 
+         DPF_scaled = scale(DPF)) 
+
+#GAM 
+settler_gam <- gam(Settlers ~ s(DPF, by = Density) + Density, 
+                 family = nb(), data = Settlement_dpf)
+summary(settler_gam)
+
+#new df for settlement prediction across DPF range for each density group
+new_data <- Settlement_dpf %>% group_by(Density) %>%
+  reframe(DPF = seq(min(DPF), max(DPF), length.out = 100)) 
+
+#adding the predicted fits on a response scale
+new_data$Predicted <- predict(settler_gam, newdata = new_data, type = "response")
+
+#plot
+ggplot(Settlement_dpf, aes(x = DPF, y = Settlers, color = Density)) +
+  geom_point(alpha = 0.4) +
+  geom_rug(colour = "black") +
+  geom_line(data = new_data, aes(x = DPF, y = Predicted, color = Density), size = 1.2) +
+  labs(y = "Daily Settler Count (Observed + Predicted)",
+       x = "Days Post Fertilization") +
+  theme_bw() +
+  theme(legend.position = 'top')
+
+#plot GAM smooths apart from graphed data
+plot(settler_gam, pages = 1, se = TRUE, shade = TRUE)
+```
+
+```{r GAM normalized}
+Settlement_dpf_normalized <- settlement_raw_long %>%
+  group_by(Density, DPF) %>% 
+  arrange(Density, DPF) %>% 
+  group_by(Density) %>% 
+  mutate(Normalized_settlers = Settlers / replicate_counts[Density],
+         Density = as.factor(Density),
+         Group = as.factor(Group),
+         Settlers = as.integer(Settlers))
+
+#density as factor
+Settlement_dpf_normalized$Density <- as.factor(Settlement_dpf_normalized$Density)
+
+#nromalized GAM
+settler_norm_gam <- gam(Normalized_settlers ~ s(DPF, by = Density) + Density, 
+                 family = nb(), data = Settlement_dpf_normalized)
+summary(settler_norm_gam)
+coef(settler_norm_gam)
+
+#visualizing GAM outputs:
+par(mfrow = c(2,2))
+plot(settler_norm_gam, shade = TRUE) #4 splines output
+abline(h = 0, lty = 'dashed') #adding line at zero
+par(mfrow = c(1,1))
+```
+
+```{r plot predictions GAM normalized}
+#plot predictions of avg effects of DPF using marginal effects
+#aggregated across density treatments
+plot_predictions(settler_norm_gam, condition = 'DPF', type = 'link') +
+  labs(y = "Linear predictor (link scale)") +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_clean()
+
+#plot predictions by density treatment
+plot_predictions(settler_norm_gam, condition = c('DPF', 'Density'), type = 'link') +
+  labs(y = "Linear predictor (link scale)") +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw()
+
+#plotting GAM effect on response scale
+#aggregated across larval densities
+plot_predictions(settler_norm_gam, condition = 'DPF', type = 'response') +
+  labs(y = "Expected response") +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_bw()
+
+#plot predictions by density treatment (without obvs)
+plot_predictions(settler_norm_gam, condition = c('DPF', 'Density'), 
+                 type = 'response') +
+  labs(y = "Expected response") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#plot with regular observations on a smooth curve
+ggplot(Settlement_dpf_normalized, aes(x = DPF, y = Normalized_settlers, 
+                                      colour = Density)) +
+  geom_smooth(aes(fill = Density), alpha = 0.1, size = 0.5) +
+   labs(y = "Observed response", 
+        title = "Observed effect of DPF on settlement",
+       subtitle = "Aggregated by larval density") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  scale_fill_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  coord_cartesian(ylim = c(0,40)) + 
+  theme_bw()
+
+#plot predictions by density treatment WITH obvs barcoded
+plot_predictions(settler_norm_gam, condition = c('DPF', 'Density'), 
+                 type = 'response', points = 0.5, rug = TRUE) +
+  labs(y = "Expected response") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  scale_fill_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = 'top')
+
+#new df for settlement prediction across DPF range for each density group
+Normalized_settlement_prediction <- Settlement_dpf_normalized %>% 
+  group_by(Density) %>%
+  reframe(DPF = seq(min(DPF), max(DPF), length.out = 100)) 
+
+#adding the predicted fits on a response scale
+Normalized_settlement_prediction$Predicted <- predict(
+  settler_norm_gam, newdata = Normalized_settlement_prediction, type = "response")
+
+#plot it: GAM-predicted larval settlement trajectories by density
+Suppfig_1 <- ggplot(Settlement_dpf_normalized, aes(x = DPF, y = Normalized_settlers, 
+                                      color = Density)) +
+  geom_point(alpha = 0.4) + #make actual obvs more translucent
+  geom_line(data = Normalized_settlement_prediction, #plotting GAM predictions
+            aes(x = DPF, y = Predicted, color = Density), size = 1) +
+  labs(y = "Normalized daily settler count (observed + predicted)",
+       x = "Days post fertilization") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = 'top')
+
+ggsave('Supp Fig 1.png', Suppfig_1, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+
+#plot GAM smooths apart from graphed data
+plot(settler_norm_gam, pages = 1, se = TRUE, shade = TRUE)
+```
+
+```{r simulating from fitted GAM}
+#simulating from fitted GAM
+#using linear predictor matrix Xlp
+xp <- predict.gam(settler_norm_gam, type = 'lpmatrix')
+dim(xp) #dimensions of prediction- 40 columns of basis functions for smooth terms in GAM
+colnames(xp) #see smooth terms of spline
+
+#fitted GAM coefficients
+beta <- coef(settler_norm_gam) 
+
+#covariance matrix of coefficients
+Vb <- vcov(settler_norm_gam)
+
+#number of simulated curves
+n_sims <- 1000
+set.seed(123)
+beta_sims <- mvrnorm(n = n_sims, mu = beta, Sigma = Vb)
+
+#multiply each sim coef vector by linear predictor
+sim_preds <- beta_sims %*% t(xp)  
+#results: rows = simulations, columns = predicted points
+
+#mean and 95% confidence intervals
+pred_mean  <- apply(sim_preds, 2, mean)
+pred_lower <- apply(sim_preds, 2, quantile, probs = 0.025)
+pred_upper <- apply(sim_preds, 2, quantile, probs = 0.975)
+
+#combine with prediction grid for plotting
+pred_grid <- data.frame(
+  DPF   = settler_norm_gam$model$DPF,
+  mean  = pred_mean,
+  lower = pred_lower,
+  upper = pred_upper)
+
+#plot
+ggplot(pred_grid, aes(x = DPF, y = mean)) +
+  geom_line(color = "black", size = 0.8) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "gray") +
+  labs(x = "Days post fertilization (DPF)",
+       y = "Predicted normalized settlers") +
+  theme_bw()
+```
+
+```{r end settlement statistical analysis}
+Density_settlement_norm_group <- settlement_raw_long %>%
+  group_by(Density, DPF, Group) %>% 
+  summarise(Daily_settlers = sum(Settlers)) %>%
+  arrange(Density, DPF) %>%
+  group_by(Group) %>% 
+  mutate(Cum_sum = cumsum(Daily_settlers),
+    Normalized_cum_sum = Cum_sum / replicate_counts[Density])
+
+#df for testing, filtering out to final day of settlement period
+Norm_sum <- Density_settlement_norm_group %>% 
+  filter(DPF >= 146) %>%
+  group_by(Density) %>%
+  mutate(se = sd(Normalized_cum_sum)/sqrt(length(Normalized_cum_sum)))
+
+#mean for below graph
+Norm_mean_sum <- Density_settlement_norm_group %>% 
+  filter(DPF >= 146) %>%
+  group_by(Density) %>%
+  summarise(Mean_settle = mean(Normalized_cum_sum),
+            se = sd(Normalized_cum_sum)/sqrt(length(Normalized_cum_sum)))
+
+#descriptive stats
+by(Norm_sum$Normalized_cum_sum, Norm_sum$Density, stat.desc)
+
+#visually check diffs in mean
+ggplot(Norm_mean_sum, aes(x = Density, y = Mean_settle, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_jitter(data = Norm_sum, aes(y = Normalized_cum_sum, 
+                                         colour = Density, shape = Density)) +
+  geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = Mean_settle - se, ymax = Mean_settle + se)) +
+  labs(x = "Larval Density", y = "Mean normalized end settlement") +
+  theme_bw() +
+  theme(axis.title.x = element_blank())
+
+leveneTest(Norm_sum$Normalized_cum_sum, Norm_sum$Density, center = median) 
+#appropriate, p = 0.88
+
+ggplot(Norm_sum, aes(sample = Normalized_cum_sum)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Density, scales = "free_y")
+
+shapiro.test(Norm_sum$Normalized_cum_sum) 
+#p = 0.623, overall normal, proceed with anova given normality from NON normalized data
+
+#ANOVA
+ds_norm_aov <- Norm_sum %>%
+  ungroup() %>%
+  anova_test(Normalized_cum_sum ~ Density)
+ds_norm_aov # p < 0.05
+
+#tukey test
+ds_norm_ph <- Norm_sum %>%
+  ungroup() %>%
+  tukey_hsd(Normalized_cum_sum ~ Density)
+ds_norm_ph #signf between 1-5* and 1-15/20***
+
+#plot workflow
+ds_norm_ph <- ds_norm_ph %>% arrange(p.adj)
+ds_norm_ph <- add_xy_position(test = ds_norm_ph,
+  data = Norm_sum %>% as_tibble(.name_repair = "unique"),  
+  formula = Normalized_cum_sum ~ Density, fun = "mean", x = "Density")
+x_levels <- levels(factor(Norm_sum$Density))
+x_map <- setNames(seq_along(x_levels), x_levels)
+ds_norm_ph <- ds_norm_ph %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+ds_norm_ph <- ds_norm_ph
+ds_norm_ph$y.position[1] <- 630 
+ds_norm_ph$y.position[2] <- 570
+```
+
+```{r plotting}
+#cumulative settlement at end of settlement period (reg box plot)
+ggplot(Norm_sum, aes(x = Density, y = Normalized_cum_sum)) +
+  geom_boxplot() +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  labs(x = "Larval Density", y = "Total Cumulative Settlers (normailized)") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = 'none')
+
+#plot with stats
+Figure_4b <- ggplot(Norm_sum, aes(x = Density, y = Normalized_cum_sum)) +
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(outlier.shape = 19) +
+  geom_jitter(aes(x = Density, y = Normalized_cum_sum, 
+                  colour = Density),
+              data = Norm_sum, width = 0.2, alpha = 1, size = 2) +
+  stat_pvalue_manual(ds_norm_ph, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 680, label.x = "1 larvae/mL") +
+  labs(x = "Larval density", y = "End cumulative settlement",
+       subtitle = "(B)", colour = "Larval density") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  coord_cartesian(ylim = c(0, 700)) +  #extend y-axis to fit signf brackets
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggsave('Figure 4b.png', Figure_4b, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+
+Figure_4 <- Figure_4a + Figure_4b
+
+ggsave('Figure 4.png', Figure_4, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+```
+
+```{r survivorship statistical analysis}
+#calculate survivorship as % rather than decimal
+survivorship$Survivorship <- survivorship$Survivorship * 100
+
+#descriptive stats
+by(survivorship$Survivorship, survivorship$Density, stat.desc)
+
+#best and worst performing buckets
+survivorship %>%
+  filter(Survivorship == min(Survivorship)) #low surv is 0.5% from Scorpius (bucket)
+survivorship %>%
+  filter(Survivorship == max(Survivorship)) #hig surv is 23% in Merope (1 larv)
+
+#homogeniety of variance
+leveneTest(survivorship$Survivorship, survivorship$Density, center = median)
+#not appropriate, p = 0.01
+
+#normality of dist
+survivorship %>% shapiro_test(Survivorship)
+#not normally dist
+
+#kruskal wallis non parametric alaternative
+ss_kw <- survivorship %>%
+  kruskal_test(Survivorship ~ Density)
+ss_kw #p < 0.002*
+
+#post-hoc dunn test
+ss_ph <- survivorship %>%
+  dunn_test(Survivorship ~ Density, p.adjust.method = "bonferroni")
+ss_ph #signf between 1/15-20 **
+
+ss_ph <- ss_ph %>% arrange(p.adj)
+ss_ph <- ss_ph %>% add_xy_position(x = "Density")
+
+```
+
+```{r plotting}
+#without stats
+ggplot(survivorship, aes(x = Density, y = Survivorship)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot() +
+  geom_jitter(aes(shape = Density, colour = Density)) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  labs(y = "Larval settlement rate (%)", x = "Larval Density") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#with stats
+Figure_5 <- ggplot(survivorship, aes(x = Density, y = Survivorship)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot() +
+  geom_jitter(aes(shape = Density, colour = Density)) +
+  stat_pvalue_manual(ss_ph, label = "p.adj.signif", 
+                     hide.ns = TRUE, y.position = "y.position") +
+  stat_compare_means(label.y = 31, label.x = "1 larvae/mL") +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  labs(y = "Larval Settlement Rate (%)", x = "Larval Density") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggsave('Figure 5.png', Figure_5, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+```
+
+## Juvenile survival/settlement data and diffs in growth
+
+```{r statistical analysis}
+#calculative settlement rate (#juveniles on feb 25 / #settlers on july 24)
+juvenile_settlement <- juvenile_settlement %>% 
+  dplyr::select(Group, Density, Juvenile_total, Larval_total) %>%
+  group_by(Density) %>%
+  mutate(Juv_survival_rate = Juvenile_total / Larval_total)
+
+#survival as %
+juvenile_settlement$Juv_survival_rate <- juvenile_settlement$Juv_survival_rate * 100
+
+#descriptive stats
+by(juvenile_settlement$Juv_survival_rate, juvenile_settlement$Density, stat.desc)
+
+#best and worst performing buckets
+juvenile_settlement %>%
+  filter(Juv_survival_rate == min(Juv_survival_rate)) 
+  #low surv is 0.05% from Keig (1 larv/ml)
+juvenile_settlement %>%
+  filter(Juv_survival_rate == max(Juv_survival_rate)) 
+  #hig surv is 1.79% in Betelgeuse (1 larv/ml)
+
+#homogeniety of variance
+leveneTest(juvenile_settlement$Juv_survival_rate, juvenile_settlement$Density, center = median) #appropraite, p = 0.07
+
+#normality of dist
+juvenile_settlement %>% group_by(Density) %>%
+  shapiro_test(Juv_survival_rate) #normally dist, p > 0.05 for all groups
+
+#anova
+js_aov <- juvenile_settlement %>%
+  ungroup() %>%
+  anova_test(Juv_survival_rate ~ Density)
+js_aov #p = 0.5, non signf
+
+#post-hoc dunn test
+js_ph <- juvenile_settlement %>%
+  ungroup() %>%
+  tukey_hsd(Juv_survival_rate ~ Density)
+js_ph #no between group signf
+
+js_ph <- js_ph %>% arrange(p.adj) 
+js_ph <- add_xy_position(test = js_ph,
+  data = juvenile_settlement %>% as_tibble(.name_repair = "unique"),
+  formula = Juv_survival_rate ~ Density, fun = "mean", x = "Density")
+
+x_levels <- levels(factor(juvenile_settlement$Density))
+x_map <- setNames(seq_along(x_levels), x_levels)
+js_ph <- js_ph %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+
+js_ph <- js_ph %>% mutate(y.position = y.position + 40)
+js_ph$y.position[2] <- 95 #specific y position of 2nd signf bracket
+
+```
+
+```{r plotting}
+juvenile_settlement$Juv_survival_rate <- juvenile_settlement$Juv_survival_rate / 100
+
+#no stat plot
+Figure_6 <- ggplot(juvenile_settlement, aes(x = Density, y = Juv_survival_rate)) +
+  stat_boxplot(geom ='errorbar', width = 0.3) +
+  geom_boxplot() +
+  geom_jitter(aes(shape = Density, colour = Density)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  labs(y = "Survival from end of settlement \n(5 months post-fertilization) to 1 year post-fertilization",
+       x = "Larval Density") +
+  theme(legend.position = "none")
+
+ggsave('Figure 6.png', Figure_6, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+```
+
+## Larval density and juvenile weight
+
+*exploration and analysis*
+```{r statistical anlaysis}
+#working df for length/weight analysis
+Density_size <- fitness %>% 
+  dplyr::select(Group, Individual, Density, Length_mm, Weight_g) %>%
+  drop_na(Density, Length_mm) %>%
+  group_by(Density) %>% 
+   mutate(mean_length = mean(Length_mm),
+         se_length = sd(Length_mm)/sqrt(length(Length_mm)),
+         mean_weight = mean(Weight_g),
+         se_weight = sd(Weight_g)/sqrt(length(Weight_g))) 
+
+#Largest and smallest star
+Density_size %>%
+  filter(Weight_g == min(Weight_g),
+         Length_mm == min(Length_mm)) #smallest star is 12mm and 0.2g in bucket group
+Density_size %>%
+  filter(Weight_g == max(Weight_g),
+         Length_mm == max(Length_mm)) #largest star is 70mm and 12.1 in 1 larv group
+
+#plotted diff in mean length
+ggplot(Density_size, aes(x = Density, y = mean_weight, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = mean_weight - se_weight, 
+                    ymax = mean_weight + se_weight)) #bucket group is signf smaller than other 3, 1/5 larv are relatively similar
+
+#descriptive stats
+by(Density_size$Weight_g, Density_size$Density, stat.desc)
+
+#identify outliers, save in object to view whole list
+Density_weight_outliers <- Density_size %>% 
+  group_by(Density) %>%
+  identify_outliers(Weight_g) #4 outliers, 1 is extreme
+
+#exclude extreme outlier
+Density_weight_flip_no_outliers <- Density_size %>%
+  filter(!Weight_g == 12.1) #only get rid of indiv 1 from betelgeuse
+
+#visualization of variation
+ggqqplot(Density_weight_flip_no_outliers, "Weight_g") +
+  facet_grid(~Density) + #multiple outliers in 1 larv group (big big boys)
+  theme_bw() 
+
+#checking assumption of homogeniety 
+leveneTest(Density_weight_flip_no_outliers$Weight_g, 
+           Density_weight_flip_no_outliers$Density, center = median) 
+#appropriate, p = 0.16
+
+#shapiro test
+Density_weight_flip_no_outliers %>% group_by(Density) %>%
+  shapiro_test(Weight_g) #2/5 groups inappropriate
+Density_weight_flip_no_outliers %>%
+  ungroup() %>%
+  shapiro_test(Weight_g) #overall normality is very inappropriate p < 0.001
+
+#non parametric analysis, given above testing
+#KW
+dw_kw <- Density_weight_flip_no_outliers %>%
+  ungroup() %>%
+  anova_test(Weight_g ~ Density) 
+dw_kw #p < 0.004**
+
+#post-hoc tukey test
+dw_ph <- Density_weight_flip_no_outliers %>% 
+  ungroup() %>%
+  dunn_test(Weight_g ~ Density, p.adjust.method = 'bonferroni') 
+dw_ph
+
+#work flow for publication-ready plot
+dw_ph <- dw_ph %>% arrange(p.adj) #arrange
+dw_ph <- add_xy_position(test = dw_ph,
+  data = Density_weight_flip_no_outliers %>% as_tibble(.name_repair = "unique"),
+  formula = Weight_g ~ Density, fun = "mean", x = "Density")
+
+#factor levels in the order used in the plot
+x_levels <- levels(factor(Density_weight_flip_no_outliers$Density))
+
+#vector to convert group names to x-axis positions
+x_map <- setNames(seq_along(x_levels), x_levels)
+
+#map to assign numeric values to xmin and xmax
+dw_ph <- dw_ph %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+
+#adjusting y.position to fit the signf brackets
+dw_ph <- dw_ph %>% mutate(y.position = y.position - 40)
+dw_ph$y.position[1] <- 13
+dw_ph$y.position[2] <- 14 #specific y position of 2nd signf bracket
+```
+
+*plotting*
+```{r plotting}
+#reg box plot
+ggplot(Density_weight_flip_no_outliers, aes(x = Density, y = Weight_g)) +
+  stat_boxplot(geom='errorbar', width = 0.2) +
+  geom_boxplot(colour = "black") +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  labs(x = "Larval density", y = "Weight (g)") +
+  coord_cartesian(ylim = c(0, 15)) +  
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#box blot with signf bars and stats
+Suppfig_2b <- ggplot(Density_weight_flip_no_outliers, aes(x = Density, y = Weight_g)) +
+  stat_boxplot(geom='errorbar', width = 0.2) +
+  geom_boxplot(colour = "black") +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  stat_pvalue_manual(dw_ph, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(label.y = 14.3, label.x = "1 larvae/mL") +
+  labs(x = "Larval density", y = "Weight (g)") +
+  coord_cartesian(ylim = c(0, 15)) +  
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggsave('Supp fig 2b.png', Suppfig_2b, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+```
+
+## Larval density and juvenile length 
+
+*exploration and analysis*
+```{r statistical analysis}
+#working df for length/weight analysis
+Density_size <- fitness %>% 
+  dplyr::select(Group, Individual, Density, Length_mm, Weight_g) %>%
+  drop_na(Density, Length_mm) %>%
+  group_by(Density) %>% 
+   mutate(mean_length = mean(Length_mm),
+         se_length = sd(Length_mm)/sqrt(length(Length_mm)),
+         mean_weight = mean(Weight_g),
+         se_weight = sd(Weight_g)/sqrt(length(Weight_g))) 
+
+#Largest and smallest star
+Density_size %>%
+  filter(Weight_g == min(Weight_g),
+         Length_mm == min(Length_mm)) #smallest star is 12mm and 0.2g in bucket group
+Density_size %>%
+  filter(Weight_g == max(Weight_g),
+         Length_mm == max(Length_mm)) #largest star is 70mm and 12.1 in 1 larv group
+
+#plotted diff in mean length
+ggplot(Density_size, aes(x = Density, y = mean_length, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = mean_length - se_length, 
+                    ymax = mean_length + se_length)) #bucket group is signf smaller than other 3
+
+#descriptive stats
+by(Density_size$Length_mm, Density_size$Density, stat.desc)
+
+#identify outliers, save in object to view whole list
+Density_size_outliers <- Density_size %>% 
+  group_by(Density) %>%
+  identify_outliers(Length_mm) #1 outlier, not extreme
+
+#checking assumption of homogeniety 
+leveneTest(Density_size$Length_mm, 
+           Density_size$Density, center = median) #appropriate, p = 0.81
+
+#shapiro test
+Density_size %>% group_by(Density) %>%
+  shapiro_test(Length_mm) #all groups appropriate, p > 0.05
+
+#visualization of variation
+ggqqplot(Density_size, "Length_mm") +
+  facet_grid(~Density) + #single outlier in 5 larv group, not extreme
+  theme_bw() 
+
+#parametric analysis, assumed independence of observations
+#anova
+dl_aov <- Density_size %>%
+  ungroup() %>%
+  anova_test(Length_mm ~ Density) 
+dl_aov #p < 0.05**
+
+#post-hoc tukey test
+dl_ph <- Density_size %>% 
+  ungroup() %>%
+  tukey_hsd(Length_mm ~ Density) 
+dl_ph
+
+#work flow for publication-ready plot
+dl_ph <- dl_ph %>% arrange(p.adj) #arrange
+dl_ph <- add_xy_position(test = dl_ph,
+  data = Density_size %>% as_tibble(.name_repair = "unique"),  #unique column names
+  formula = Length_mm ~ Density, fun = "mean", x = "Densities")
+
+#factor levels in the order used in the plot
+x_levels <- levels(factor(Density_size$Density))
+
+#vector to convert group names to x-axis positions
+x_map <- setNames(seq_along(x_levels), x_levels)
+
+#map to assign numeric values to xmin and xmax
+dl_ph <- dl_ph %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+
+#adjusting y.position to fit the signf brackets
+dl_ph <- dl_ph %>% mutate(y.position = y.position + 40)
+dl_ph$y.position[2] <- 95 #specific y position of 2nd signf bracket
+```
+
+*plotting*
+```{r plotting}
+#reg box plot
+ggplot(Density_size, aes(x = Density, y = Length_mm)) +
+  stat_boxplot(geom='errorbar', width = 0.2) +
+  geom_boxplot(colour = "black") +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  labs(x = "Larval density", y = "Length (mm)") +
+  coord_cartesian(ylim = c(0, 80)) +  
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#box blot with signf bars and stats
+Suppfig_2a <- ggplot(Density_size, aes(x = Density, y = Length_mm)) +
+  stat_boxplot(geom='errorbar', width = 0.2) +
+  geom_boxplot(colour = "black") +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  stat_pvalue_manual(dl_ph, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 101, label.x = "1 larvae/mL") +
+  labs(x = "Larval density", y = "Length (mm)") +
+  coord_cartesian(ylim = c(0, 105)) +  
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggsave('Supp fig 2a.png', Suppfig_2a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+
+Suppfig_2 <- Suppfig_2a + Suppfig_2b
+
+ggsave('Supp fig 2.png', Suppfig_2, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+```
+
+## Larval density and juvenile flip time
+
+*exploration and statistical analysis*
+```{r statistical analysis}
+#working vector for  density/flip exploration
+Density_flip <- fitness %>% 
+  dplyr::select(Group, Individual, Density, Flip_time, Flip_time_seconds) %>% 
+  drop_na(Density, Flip_time) %>% #remove unknowns
+  group_by(Density) %>% 
+  mutate(mean_time = mean(Flip_time_seconds),
+         se = sd(Flip_time_seconds)/sqrt(length((Flip_time_seconds))))
+
+#largest and smallest flip_time
+Density_flip %>%
+  filter(Flip_time == min(Flip_time)) 
+#fastest was 49 seconds from quasar indiv 2 (15-20 larv)
+Density_flip %>%
+  filter(Flip_time == max(Flip_time))
+#slowest was 30 minutes, both electra stars 
+
+#visual diff in mean time to flip
+ggplot(Density_flip, aes(x = Density, y = mean_time, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = mean_time - se, ymax = mean_time + se))
+
+#descriptive stats
+by(Density_flip$Flip_time_seconds, Density_flip$Density, stat.desc)
+
+#identify outliers, save in object to view whole list
+Density_flip_outliers <- Density_flip %>% 
+  group_by(Density) %>%
+  identify_outliers(Flip_time) #8 outliers, 5 are extreme
+
+#remove 5 extreme outliers from analysis
+Density_flip_no_outliers <- Density_flip %>% 
+   group_by(Density) %>%
+   filter(!Flip_time_seconds == 1800,
+          !Flip_time_seconds == 1322,
+          !Flip_time_seconds == 1132,
+          !Flip_time_seconds == 992)
+
+#checking assumption of homogenity for testing
+leveneTest(Density_flip_no_outliers$Flip_time_seconds, 
+           Density_flip_no_outliers$Density, center = median) #appropriate, p = 0.40
+
+#shapiro test
+Density_flip_no_outliers %>% group_by(Density) %>%
+  shapiro_test(Flip_time_seconds) #3/4 groups non-appropriate, p < 0.05
+
+#visualization of variation
+ggqqplot(Density_flip_no_outliers, "Flip_time_seconds") +
+  facet_grid(~Density) +
+  theme_bw() 
+
+#Kruskal-walis non-parametric alternative to ANOVA
+df_kw <- Density_flip_no_outliers %>%
+  ungroup() %>%
+  kruskal_test(Flip_time ~ Density)
+df_kw #p = 0.317
+
+#Post-hoc testing
+df_ph <- Density_flip_no_outliers %>%
+  ungroup() %>% 
+  dunn_test(Flip_time_seconds ~ Density, p.adjust.method = "bonferroni")
+df_ph
+
+#arrange by adjusted p-value for plotting
+df_ph <- df_ph %>% arrange(p.adj)
+df_ph <- df_ph %>% add_xy_position(x = "Density")
+```
+
+*plotting*
+```{r plotting}
+#box plot, removed extreme outliers post outlier analysis
+Figure_7a <- ggplot(Density_flip_no_outliers, aes(x = Density, y = Flip_time)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot() +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  labs(x="Larval density", y="Flip time") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggsave('Figure 7a.png', Figure_7a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+
+#plot (with outliers)
+ggplot(Density_flip, aes(x = Density, y = Flip_time)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot() +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  labs(x="Larval density (larvae/mL)", y="Flip time") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#plot with stats
+ggboxplot(Density_flip_no_outliers, x = "Density", y = "Flip_time", outliers = FALSE) + 
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  stat_pvalue_manual(df_ph, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(label.y = 1270, label.x = "2 larvae/mL") +
+  labs(x = "Larval Density", y = "Flip Time") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+```
+
+## Larval density and juvenile length and flip time
+
+*linear regression model*
+```{r linear regression no outliers}
+#working vector
+Density_size_flip <- fitness %>%
+  dplyr::select(Group, Individual, Density, Length_mm, Flip_time, Flip_time_seconds) %>%
+  drop_na(Density, Length_mm) %>%
+  filter(!Flip_time_seconds == 1132)
+
+#find and remove outliers (also completed in chunk XX)
+Density_size_flip_outliers <- Density_size_flip %>% 
+  group_by(Density) %>%
+  identify_outliers(Flip_time) #7 outliers, 4 are extreme
+
+#remove 4 extreme outliers from analysis
+Density_size_flip_no_outliers <- Density_size_flip %>% 
+   group_by(Density) %>%
+   filter(!Flip_time_seconds == 1800,
+          !Flip_time_seconds == 1322,
+          !Flip_time_seconds == 1132)
+
+Density_size_flip_no_outliers$Density <- as.factor(Density_size_flip_no_outliers$Density)
+
+#simple linear regression
+slr <- lm(Flip_time_seconds ~ Length_mm, data = Density_size_flip_no_outliers)
+summary(slr)
+
+#dummy variables
+test <- Density_size_flip_no_outliers %>% 
+  dplyr::select(Density, Length_mm, Flip_time, Flip_time_seconds)
+dv <- dummy_cols(test)
+dv
+
+#interacting model
+slr_density <- lm(Flip_time_seconds ~ Length_mm:`Density_2 larvae/mL` + 
+                                      Length_mm:`Density_5 larvae/mL` + 
+                                      Length_mm:`Density_15-20 larvae/mL`,
+                  data = dv)
+summary(slr_density)
+
+#compare models
+anova(slr_density) #all p ns
+anova(slr, slr_density) #p = 0.26
+
+#compare models with null
+null <- lm(Flip_time_seconds ~ 1, data = Density_size_flip_no_outliers)
+summary(null)
+anova(slr, null) #p = 0.08
+anova(slr_density, null) #p = 0.15
+```
+
+```{r linear regression outliers}
+Density_size_flip$Density <- as.factor(Density_size_flip$Density)
+
+#simple linear regression w/ outliers
+slr_o <- lm(Flip_time_seconds ~ Length_mm, data = Density_size_flip)
+summary(slr_o) #p = 0.1, overall F test p = 0.1
+
+#dv outliers
+test <- Density_size_flip %>% 
+  dplyr::select(Density, Length_mm, Flip_time, Flip_time_seconds)
+dv_o <- dummy_cols(test)
+dv_o
+
+#interacting model w/ outliers
+slr_density_o <- lm(Flip_time_seconds ~ Length_mm:`Density_2 larvae/mL` + 
+                                      Length_mm:`Density_5 larvae/mL` + 
+                                      Length_mm:`Density_15-20 larvae/mL`,
+                  data = dv_o)
+summary(slr_density_o) #ns, overall F test p = 0.188
+```
+
+*plotting*
+```{r plotting}
+#plot with lm line
+Figure_7b <- ggplot(Density_size_flip_no_outliers, aes(x = Length_mm, y = Flip_time)) +
+  geom_smooth(data = Density_size_flip_no_outliers,
+              method = lm, colour = "black", se = TRUE) +
+  geom_point(aes(shape = Density, colour = Density), size = 2) +
+  scale_shape_manual(values = c(15, 16, 17, 18),
+                     name = "Larval density") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77"),
+                     name = "Larval density") +
+  labs(x = "Length (mm)",
+       y = "Flip time", subtitle = "(B)") +
+  theme_bw() +
+  theme(legend.position = 'none')
+
+#combine figure 7a and 7b
+Figure_7a <- ggplot(Density_flip_no_outliers, aes(x = Density, y = Flip_time)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot() +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  labs(x = "Larval density", y = "Flip time", subtitle = "(A)") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+Figure_7 <- Figure_7a + Figure_7b
+
+ggsave('Figure 7.png', Figure_7, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+```
+
+## Specimen models
+
+*asymp modeling*
+```{r asymp model and bootstrap}
+specimens <- read.csv("Pycnopodia specimen measurements.csv")
+
+#reordering
+specimens$Specimen_type <- factor(
+  specimens$Specimen_type, 
+  levels = c("Specimen", "Aquarium display", "Cupid Cohort"), 
+  labels = c("Museum specimen", "Alaskan stars", "Cupid cohort"))
+
+#nls asymp model
+asymp <- nls(Arm_count ~ SSasymp(Length_cm, Asym, R0, lrc), data = specimens)
+summary(asymp)
+coef(asymp) 
+
+#creating seq of 100 evenly spaced body lengths in the observed body size range 
+length_seq <- seq(min(specimens$Length_cm), max(specimens$Length_cm), length.out = 100)
+
+#prediction grid for model from length_seq, usable for later model predictions
+pred_grid <- data.frame(Length_cm = length_seq)
+
+#bootstrap model fits
+set.seed(123)  #for reproducibility, random number seed
+
+#bootstrap model replicates
+n_boot <- 1000
+
+#bootstrap replicate
+boot_preds <- replicate(n_boot, { #drawing bootstrap sample w/ replacement
+  boot_sample <- specimens[sample(1:nrow(specimens), replace = TRUE), ]
+  tryCatch({ #fitting model to each bootstrap sample, predict arm count across all lengths
+    boot_model <- nls(Arm_count ~ SSasymp(Length_cm, Asym, R0, lrc), data = boot_sample)
+    predict(boot_model, newdata = pred_grid)
+  }, error = function(e) rep(NA, length(length_seq)))
+})
+
+#transpose, remove failed fits (NAs)
+boot_preds <- t(boot_preds) 
+   #transposes, rows=bootstrap reps; columns=predictions for length
+boot_preds <- boot_preds[complete.cases(boot_preds), ] #remove failed fits
+
+#calculate mean, conf interval
+pred_grid$mean <- apply(boot_preds, 2, mean) #mean prediction at each length
+pred_grid$lower <- apply(boot_preds, 2, quantile, probs = 0.025) #2.5th percentile confint
+pred_grid$upper <- apply(boot_preds, 2, quantile, probs = 0.975) #97.5th percentile confint
+
+#extract model coefs, rounds for notation and reporting on graph
+coef_vals <- coef(asymp) #saving model coefs in coef_vals
+asym <- round(coef_vals["Asym"], 2)
+r0 <- round(coef_vals["R0"], 2)
+lrc <- round(coef_vals["lrc"], 2)
+
+#creating psuedo R2 from residuals of model and prediction grid
+y_pred <- predict(asymp) #predicted y values from model
+y_obs <- specimens$Arm_count #the actual observed arm counts
+rss <- sum((y_obs - y_pred)^2)  #total model error (diff in observed vs predicted values)
+tss <- sum((y_obs - mean(y_obs))^2)  #total variability in data from the mean
+
+#psuedo R2, returning as a result of nrs() not natively calculating this for me :(
+r_squared <- 1 - (rss / tss)
+round(r_squared, 3) #pretty great fit, psuedo R2 = 0.881
+```
+
+*plotting*
+```{r plotting}
+#annotate with summary stats
+label_text <- paste0(
+  "Asym = ", asym, "\n",
+  "R0 = ", r0, "\n",
+  "lrc = ", lrc, "\n",
+  "Pseudo R² = ", round(r_squared, 3))
+
+#plot model with coefs
+Figure_8a <- ggplot(specimens, aes(x = Length_cm, y = Arm_count)) +
+  geom_point(aes(colour = Specimen_type, shape = Specimen_type)) + 
+  geom_ribbon(data = pred_grid, aes(x = Length_cm, ymin = lower, ymax = upper),
+              alpha = 0.5, fill = "grey",
+              inherit.aes = FALSE) + #override aes mapping in call to not inherit aes
+  geom_line(data = pred_grid, aes(x = Length_cm, y = mean), 
+            color = "black", size = 0.7) +
+  geom_vline(xintercept = 20, linetype = "dashed", color = "black") +
+  annotate("text", x = 22, y = 10, 
+           label = label_text, hjust = 0, size = 3.5) + #adding summary stats to plot
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb")) +
+  coord_cartesian(ylim = c(5, 25)) +
+  labs(x = "Length (cm)", y = "Number of arms", shape = "Specimen type",
+    colour = "Specimen type", subtitle = "(A)") +
+  theme_bw() +
+  theme(legend.position = 'none')
+
+ggsave('Figure 8a.png', Figure_8a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+```
+
+*allometric modelling*
+```{r power-rule model and bootstrap}
+#reordering/relabeling
+specimens_alive$Specimen_type <- factor(
+  specimens_alive$Specimen_type, 
+  levels = c("Cupid Cohort", "Aquarium display"), 
+  labels = c("Cupid cohort", "Alaskan stars"))
+
+#weight as kg
+specimens_alive$Weight_kg <- specimens_alive$Weight_g /1000
+
+#model
+lm_log <- lm(log(Weight_kg) ~ log(Length_cm), data = specimens_alive)
+summary(lm_log)
+
+#back-transform coefficients
+a <- exp(coef(lm_log)[1])
+b <- coef(lm_log)[2]
+b
+
+# Labels
+a_label <- formatC(a, format = "e", digits = 2)
+b_label <- round(b, 2)
+a #4.921003e-05 
+b #2.846814, indicates negative allometry
+
+#bootstrapping
+set.seed(123)
+
+#number of bootstraps 
+n_boot <- 1000
+
+#storing boot coefs
+boot_coefs <- map_dfr(1:n_boot, function(i) {
+  boot_sample <- specimens_alive %>% sample_frac(replace = TRUE) #re-sample
+  boot_model <- lm(log(Weight_kg) ~ log(Length_cm), data = boot_sample) #fit model
+  tibble( #extract and return coefs
+    iter = i,
+    intercept = coef(boot_model)[1],
+    slope = coef(boot_model)[2]
+  )
+})
+
+#back transform coefs
+boot_coefs <- boot_coefs %>%
+  mutate(a = exp(intercept),
+         b = slope)
+
+#summarize w/ confidence intervals
+boot_summary <- boot_coefs %>%
+  summarise(
+    a_mean = mean(a),
+    a_ci_lower = quantile(a, 0.025),
+    a_ci_upper = quantile(a, 0.975),
+    b_mean = mean(b),
+    b_ci_lower = quantile(b, 0.025),
+    b_ci_upper = quantile(b, 0.975))
+
+#summary, printing
+print(boot_summary)
+
+#sequence of Length values to predict over
+length_seq <- seq(min(specimens_alive$Length_cm), max(specimens_alive$Length_cm), length.out = 100)
+
+#generate predicted weight curves for each bootstrap replicate
+boot_lines <- boot_coefs %>%
+  mutate(iter = row_number()) %>%
+  group_by(iter) %>%
+  do({
+    data.frame(
+      Length_cm = length_seq,
+      Weight_kg = exp(.$intercept + .$slope * log(length_seq)))
+  })
+
+boot_lines <- map_dfr(1:nrow(boot_coefs), function(i) {
+  data.frame(
+    Length_cm = length_seq,
+    Weight_kg = exp(boot_coefs$intercept[i] + boot_coefs$slope[i] * log(length_seq)),
+    iter = i)
+  })
+
+#predicted and observed values
+y_pred <- predict(lm_log)
+y_obs <- log(specimens_alive$Weight_kg)
+
+#calculate pseudo-R²
+rss <- sum((y_obs - y_pred)^2)
+tss <- sum((y_obs - mean(y_obs))^2)
+r_squared <- 1 - (rss / tss)
+r2_label <- round(r_squared, 3)
+
+#precomputed back-transformed values
+a_label <- formatC(a, format = "e", digits = 2)
+b_label <- round(b, 2)
+
+label_text <- paste0(
+  "Weight = ", a_label, " × Length^", b_label, "\n",
+  "Pseudo R² = ", r2_label
+)
+```
+
+*plotting*
+```{r plotting}
+#bootstrapped curves plot
+Figure_8b <- ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  geom_line(data = boot_lines, aes(x = Length_cm, y = Weight_kg),
+            inherit.aes = FALSE, alpha = 0.2, size = 0.2, color = "grey") +
+  stat_function(fun = function(x) a * x^b, color = "black", size = 0.6,
+                inherit.aes = FALSE) +
+  geom_vline(xintercept = 20, linetype = "dashed", color = "black") +
+  annotate("text", x = 22, y = 4.5,
+           label = label_text, hjust = 0, size = 3.5) +
+  coord_cartesian(xlim = c(0,60)) +
+  scale_shape_manual(values = c(15, 17)) +
+  scale_colour_manual(values = c("#8da0cb", "#fc8d62")) +
+  labs(x = "Length (cm)", y = "Weight (kg)", subtitle = "(B)") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggsave('Figure 8b.png', Figure_8b, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+
+Figure_8 <- Figure_8a + Figure_8b
+
+ggsave('Figure 8.png', Figure_8, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+
+#non linear model, no text
+ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  geom_line(data = boot_lines, aes(x = Length_cm, y = Weight_kg),
+            inherit.aes = FALSE, alpha = 0.2, size = 0.2, color = "grey") +
+  stat_function(fun = function(x) a * x^b, color = "black", size = 0.6,
+                inherit.aes = FALSE) +
+  theme_bw() +
+  labs(x = "Length (cm)", y = "Weight (kg)") +
+  coord_cartesian(xlim = c(0,60)) +
+  scale_shape_manual(values = c(15, 17)) +
+  scale_colour_manual(values = c("#8da0cb", "#fc8d62")) +
+  theme(legend.position = "none")
+```
+
+*plot comparison*
+```{r allometric and asymptotic models compared}
+a_plot <- ggplot(specimens, aes(x = Length_cm, y = Arm_count)) +
+  geom_point(aes(colour = Specimen_type, shape = Specimen_type)) + 
+  geom_ribbon(data = pred_grid, aes(x = Length_cm, ymin = lower, ymax = upper),
+              alpha = 0.5, fill = "grey",
+              inherit.aes = FALSE) + #override aes mapping in call to not inherit aes
+  geom_line(data = pred_grid, aes(x = Length_cm, y = mean), 
+            color = "black", size = 0.7) +
+  geom_vline(xintercept = 20, linetype = "dashed", color = "black") +
+  annotate("text", x = 22, y = 10, 
+           label = label_text, hjust = 0, size = 3.5) + #adding summary stats to plot
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb")) +
+  scale_shape_manual(values = c(19, 17, 15)) +
+  coord_cartesian(ylim = c(5, 25)) +
+  labs(x = "Length (cm)", y = "Number of arms", 
+       shape = "Specimen type", colour = "Specimen type",
+       subtitle = "(A)") +
+  theme_bw() +
+  theme(legend.position = 'none')
+
+b_plot <- ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  geom_line(data = boot_lines, aes(x = Length_cm, y = Weight_kg),
+            inherit.aes = FALSE, alpha = 0.2, size = 0.2, color = "grey") +
+  stat_function(fun = function(x) a * x^b, color = "black", size = 0.6,
+                inherit.aes = FALSE) +
+  geom_vline(xintercept = 20, linetype = "dashed", color = "black") +
+  annotate("text", x = 22, y = 4.5,
+           label = label_text, hjust = 0, size = 3.5) +
+  theme_bw() +
+  labs(x = "Length (cm)", y = "Weight (kg)",
+       subtitle = "(B)") +
+  coord_cartesian(xlim = c(0,60)) +
+  scale_colour_manual(values = c("#8da0cb", "#fc8d62")) +
+  scale_shape_manual(values = c(15, 17)) +
+  theme(legend.position = "none")
+
+a_plot / b_plot
+```
+
+## Juvenile diet and weight
+
+*exploration and analysis* 
+```{r statistical analysis}
+#working df for all diet analyses
+Diet <- fitness %>% 
+  dplyr::select(Group, Individual, Settlement_diet, 
+                Flip_time, Flip_time_seconds, Weight_g, Arm_count, Length_mm) %>%
+  drop_na(Settlement_diet, Weight_g)
+
+#diet/weight summary
+Diet_weight <- Diet %>% 
+  dplyr::select(Group, Individual, Settlement_diet, 
+                Flip_time, Flip_time_seconds, Weight_g, Arm_count, Length_mm) %>%
+  drop_na(Settlement_diet, Weight_g) %>% 
+  group_by(Settlement_diet) %>% 
+  summarise(mean_weight = mean(Weight_g),
+    sd_weight = sd(Weight_g),
+    lower_weight = mean(Weight_g) - sd(Weight_g), 
+    upper_weight = mean(Weight_g) + sd(Weight_g))
+
+#working df for length/weight analysis
+Diet_size <- Diet %>% 
+  dplyr::select(Group, Individual, Settlement_diet, Weight_g, Length_mm) %>%
+  drop_na(Settlement_diet, Weight_g, Length_mm) %>%
+  group_by(Settlement_diet) %>% 
+   mutate(mean_length = mean(Length_mm),
+         se_length = sd(Length_mm)/sqrt(length(Length_mm)),
+         mean_weight = mean(Weight_g),
+         se_weight = sd(Weight_g)/sqrt(length(Weight_g))) 
+
+#fattest and skinniest star
+Diet_size %>%
+  filter(Weight_g == min(Weight_g)) #skinniest star 0.2g in Regulus/ktchn sink
+Diet_size %>%
+  filter(Weight_g == max(Weight_g)) #fattest star is 12.1g in Betelgeuse/ktchn sink
+
+#plotted diff in mean length
+ggplot(Diet_size, aes(x = Settlement_diet, y = mean_weight, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = mean_weight - se_weight, 
+                    ymax = mean_weight + se_weight)) #MLML Urchins signf skinnier (lol)
+
+#descriptive stats
+by(Diet_size$Weight_g, Diet_size$Settlement_diet, stat.desc)
+
+#identify outliers, save in object to view whole list
+Diet_weight_outliers <- Diet_size %>% 
+  group_by(Settlement_diet) %>%
+  identify_outliers(Weight_g) #4 outliers, none extreme
+
+#visualization of variation
+ggqqplot(Diet_size, "Weight_g") +
+  facet_grid(~Settlement_diet) + #multiple outliers in ktchn sink
+  theme_bw() 
+
+Diet_size$Settlement_diet <- as.factor(Diet_size$Settlement_diet)
+
+#checking assumption of homogeniety 
+leveneTest(Diet_size$Weight_g, 
+           Diet_size$Settlement_diet, center = median) 
+#appropriate, p = 0.3526
+
+#shapiro test(s)
+Diet_size %>% group_by(Settlement_diet) %>%
+  shapiro_test(Weight_g) #ktchn sink non norm dist
+Diet_size %>%
+  ungroup() %>%
+  shapiro_test(Weight_g) #overall normality is very inappropriate p < 0.001
+
+#non parametric analysis, given above testing
+#KW
+dietw_kw <- Diet_size %>%
+  ungroup() %>%
+  kruskal_test(Weight_g ~ Settlement_diet) 
+dietw_kw #p = 0.326
+
+#pairwise comparisons
+dietw_ph <- Diet_size %>% 
+  ungroup() %>%
+  dunn_test(Weight_g ~ Settlement_diet, p.adjust.method = 'bonferroni') 
+dietw_ph #all non signf
+
+#work flow for publication-ready plot
+dw_ph <- dw_ph %>% arrange(p.adj) #arrange
+dw_ph <- add_xy_position(test = dw_ph,
+  data = Density_weight_flip_no_outliers %>% as_tibble(.name_repair = "unique"),
+  formula = Weight_g ~ Density, fun = "mean", x = "Density")
+
+```
+
+```{r plotting}
+#graph, no stats needed due to insignificance from above testing
+ggplot(Diet, aes(x = Settlement_diet, y = Weight_g)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot(colour = "black") +
+  geom_jitter(aes(colour = Settlement_diet, shape = Settlement_diet)) +
+  labs(x= "Settlement diet", y = "Weight (g)") +
+  scale_shape_manual(values = c(3, 8, 4, 11)) +
+  scale_colour_brewer(type = 'div', palette = 3) +
+  theme_bw() +
+  theme(legend.position = 'none')
+```
+
+## Juvenile diet and length
+
+*exploration and anlsysis*
+```{r statistical analysis}
+#working df for length/weight analysis
+Diet_size <- Diet %>% 
+  dplyr::select(Group, Individual, Settlement_diet, Weight_g, Length_mm) %>%
+  drop_na(Settlement_diet, Weight_g, Length_mm) %>%
+  group_by(Settlement_diet) %>% 
+   mutate(mean_length = mean(Length_mm),
+         se_length = sd(Length_mm)/sqrt(length(Length_mm)),
+         mean_weight = mean(Weight_g),
+         se_weight = sd(Weight_g)/sqrt(length(Weight_g))) 
+
+#fattest and skinniest star
+Diet_size %>%
+  filter(Length_mm == min(Length_mm)) #smallest star 12mm in Regulus/ktchn sink
+Diet_size %>%
+  filter(Length_mm == max(Length_mm)) #fattest star is 70mm in Betelgeuse/ktchn sink
+
+#plotted diff in mean length
+ggplot(Diet_size, aes(x = Settlement_diet, y = mean_length, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = mean_length - se_length, 
+                    ymax = mean_length + se_length)) #MLML Urchins signf smaller
+
+#descriptive stats
+by(Diet_size$Length_mm, Diet_size$Settlement_diet, stat.desc)
+
+#identify outliers, save in object to view whole list
+Diet_length_outliers <- Diet_size %>% 
+  group_by(Settlement_diet) %>%
+  identify_outliers(Length_mm) #1 outlier, not extreme
+
+#visualization of variation
+ggqqplot(Diet_size, "Length_mm") +
+  facet_grid(~Settlement_diet) + #fairly normal across the board
+  theme_bw() 
+
+#checking assumption of homogeniety 
+leveneTest(Diet_size$Length_mm, 
+           Diet_size$Settlement_diet, center = median) 
+#appropriate, p = 0.3375
+
+#shapiro test(s)
+Diet_size %>% group_by(Settlement_diet) %>%
+  shapiro_test(Length_mm) #all norm
+Diet_size %>%
+  ungroup() %>%
+  shapiro_test(Length_mm) #overall normality appropriate p > 0.05
+
+#parametric analysis, given above testing
+#anova
+dietl_aov <- Diet_size %>%
+  ungroup() %>%
+  anova_test(Length_mm ~ Settlement_diet) 
+dietl_aov #p = 0.208
+
+#pairwise comparisons
+dietl_ph <- Diet_size %>% 
+  ungroup() %>%
+  tukey_hsd(Length_mm ~ Settlement_diet) 
+dietl_ph #non signf, all ns
+```
+
+*plotting*
+```{r plotting}
+#graph, no stats
+ggplot(Diet, aes(x = Settlement_diet, y = Length_mm)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot(colour = "black") +
+  geom_jitter(aes(colour = Settlement_diet, shape = Settlement_diet)) +
+  labs(x= "Settlement diet", y = "Length (mm)") +
+  scale_shape_manual(values = c(3, 8, 4, 11)) +
+  scale_colour_brewer(type = 'div', palette = 3) +
+  theme_bw() +
+  theme(legend.position = 'none')
+```
+
+## Juvenile diet and flip time
+
+*exploration and anlsysis*
+```{r statistical analysis}
+#working df for length/weight analysis
+Diet_flip <- Diet %>% 
+  dplyr::select(Group, Individual, Settlement_diet, Flip_time, Flip_time_seconds) %>%
+  drop_na(Settlement_diet, Flip_time) %>%
+  group_by(Settlement_diet) %>% 
+   mutate(mean = mean(Flip_time_seconds),
+         se = sd(Flip_time_seconds)/sqrt(length(Flip_time_seconds))) 
+
+#slowest and fastest flips
+Diet_flip %>%
+  filter(Flip_time_seconds == min(Flip_time_seconds)) 
+#fastest flip 49 secs from Quasar/ktchn sink star
+Diet_flip %>%
+  filter(Flip_time_seconds == max(Flip_time_seconds))
+#slowest flip 30 mins from Electra stars (x2) both ktchn sink 
+
+#flip time means across groups
+ggplot(Diet_flip, aes(x = Settlement_diet, y = mean, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = mean - se, 
+                    ymax = mean + se)) #juv stars/MLML urchins fast flippers
+
+#descriptive stats
+by(Diet_flip$Flip_time_seconds, Diet_flip$Settlement_diet, stat.desc)
+
+#identify outliers, save in object to view whole list
+Diet_flip_outliers <- Diet_flip %>% 
+  group_by(Settlement_diet) %>%
+  identify_outliers(Flip_time_seconds) #8 outliers, 4 extreme
+
+#exclude extreme outliers
+Diet_flip_no_outliers <- Diet_flip %>% 
+   group_by(Settlement_diet) %>%
+   filter(!Flip_time_seconds == 1800,
+          !Flip_time_seconds == 1322,
+          !Flip_time_seconds == 1235)
+
+#visualization of variation
+ggqqplot(Diet_flip_no_outliers, "Flip_time") +
+  facet_grid(~Settlement_diet) + #ktchn sink skewed
+  theme_bw() 
+
+Diet_flip_no_outliers$Settlement_diet <- as.factor(Diet_flip_no_outliers$Settlement_diet)
+
+#checking assumption of homogeniety 
+leveneTest(Diet_flip_no_outliers$Flip_time_seconds, 
+           Diet_flip_no_outliers$Settlement_diet, center = median) 
+#appropriate, p = 0.3778
+
+#shapiro test(s)
+Diet_flip_no_outliers %>% group_by(Settlement_diet) %>%
+  shapiro_test(Flip_time_seconds) #juv stars and ktchn sink non normal p < 0.01
+Diet_flip_no_outliers %>%
+  ungroup() %>%
+  shapiro_test(Flip_time_seconds) #extremely non normal, p < 0.000001
+
+#non parametric analysis, given above testing
+#kw
+dietf_kw <- Diet_flip_no_outliers %>%
+  ungroup() %>%
+  kruskal_test(Flip_time_seconds ~ Settlement_diet) 
+dietf_kw #p = 0.723
+
+#pairwise comparisons
+dietf_ph <- Diet_flip_no_outliers %>% 
+  ungroup() %>%
+  dunn_test(Flip_time_seconds ~ Settlement_diet) 
+dietf_ph #non signf, all ns
+```
+
+*plotting*
+```{r plotting}
+#graph, no stats
+ggplot(Diet_flip_no_outliers, aes(x = Settlement_diet, y = Flip_time)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot(colour = "black") +
+  geom_jitter(aes(colour = Settlement_diet, shape = Settlement_diet)) +
+  labs(x= "Settlement diet", y = "Flip time") +
+  scale_shape_manual(values = c(3, 8, 4, 11)) +
+  scale_colour_brewer(type = 'div', palette = 3) +
+  theme_bw() +
+  theme(legend.position = 'none')
+```
+
+## Settlement diet and juvenile length and flip time
+
+```{r linear regression}
+#working vector
+Diet_size_flip <- fitness %>%
+  dplyr::select(Group, Individual, Settlement_diet, 
+                Length_mm, Flip_time, Flip_time_seconds) %>%
+  drop_na(Group, Settlement_diet, Flip_time)
+
+#find and remove outliers, also done in chunk/line (XX)
+Diet_size_flip_outliers <- Diet_size_flip %>% 
+  group_by(Settlement_diet) %>%
+  identify_outliers(Flip_time_seconds) #8 outliers, 4 extreme
+
+#exclude extreme outliers
+Diet_size_flip_no_outliers <- Diet_size_flip %>% 
+   group_by(Settlement_diet) %>%
+   filter(!Flip_time_seconds == 1800,
+          !Flip_time_seconds == 1322,
+          !Flip_time_seconds == 1235)
+
+Diet_size_flip_no_outliers$Settlement_diet <- as.factor(Diet_size_flip_no_outliers$Settlement_diet)
+
+#simple linear regression (already computed above)
+summary(slr)
+
+#interacting model
+slr_diet <- lm(Flip_time_seconds ~ Length_mm * Settlement_diet,
+                        data = Diet_size_flip_no_outliers)
+summary(slr_diet) #p = 0.3
+
+#multiple lr with length + settlement diet
+mlr_diet <- lm(Flip_time_seconds ~ Settlement_diet + Length_mm,
+                  data = Diet_size_flip_no_outliers)
+summary(mlr_diet) #p = 0.08
+```
+
+*plotting*
+```{r plotting}
+#plot with lm line
+ggplot(Diet_size_flip_no_outliers, aes(x = Length_mm, y = Flip_time)) +
+  geom_smooth(data = Diet_size_flip_no_outliers,
+              method = lm, colour = "black", se = TRUE) +
+  geom_point(aes(shape = Settlement_diet, colour = Settlement_diet), size = 2) +
+  scale_shape_manual(values = c(0, 1, 2, 5)) +
+  scale_colour_brewer(type = 'div', palette = 3) +
+  labs(x = "Length (mm)",
+       y = "Flip time") +
+  theme_bw() +
+  theme(legend.position = 'top')
+```
+
+## Eating trial
+
+*plotting*
+```{r}
+##Did different diets effect eating?
+Eat_diet <- fitness %>% drop_na(Group, Settlement_diet, Eating) %>%
+  group_by(Settlement_diet, Eating) %>% 
+  tally() %>% 
+  mutate(pct = n/sum(n)) 
+
+#organizing Eating times
+Eat_diet$Eating <- factor(Eat_diet$Eating, 
+                          levels=c('Hour 8', 'Hour 24', 'Hour 48', 'Did not eat'))
+
+#bar plot with percent (proportion) to account for kitchen sink bias
+ggplot(Eat_diet) + 
+  geom_bar(stat="identity", position="dodge", width = 0.7,
+           aes(x=Settlement_diet, y=pct, fill=Eating)) +
+  scale_fill_manual(values= c("#7bb662", "#ffd301", "#E03C32", "#A0A0A0")) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() +
+  labs(y = "Juveniles that ate (%)", x = "Settlement diet", fill = "Eating interval") +
+  theme(legend.position = 'top')
+```
+

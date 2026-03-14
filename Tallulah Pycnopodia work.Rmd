@@ -1,0 +1,3671 @@
+---
+title: "Pycno Data (cleaned)"
+author: "Tallulah Story"
+date: "2025-06-12"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## Setup
+```{r packages, include=FALSE}
+knitr::opts_chunk$set(echo = T)
+
+#Packages used
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(gt)               #Creating tables
+library(lubridate)        #Formatting dates and times
+library(patchwork)        #Combining plots
+library(ggtext)           #Plot aesthetics
+library(ggthemes)         #Additional ggplot themes
+library(plotly)           #interactive 3d plot (chunk 22)
+library(scatterplot3d)    #non-interactive 3d plot (chunk 22)
+library(pastecs)          #for descriptive statistics relating to time-series data
+library(car)              #statistical analyses/tools
+library(ggpubr)           #plots containing statistical information
+library(mgcv)             #mixed GAMM computational vehicle
+library(marginaleffects)  #compute and plot predictions from models
+library(rstatix)          #post-hoc tests for a pipe-friendly interface
+
+getwd() 
+setwd("/Users/loganstory/Desktop/SSI/Data")
+
+```
+
+
+.csv files cleaned and included in GitHub
+
+- Manual cleaning of fitness data included:
+    1) Replacement of rogue values (ie. random spaces, random non-numerical items)
+    2) Replacing NA with N/A
+    3) Excluding any data collected from "unknowns" with just NA
+    4) Addition of "eating" and "Eating_score" columns
+    5) Replacing incorrect NA values
+    
+- Manual cleaning of growth data set(s) included: 
+    1) Removal of random commas/characters
+    2) Removal of missing data points
+    
+- Manual cleaning of settlement data set(s) included:
+    1) Replacing empty cells with 0
+    2) Removal of cell totals
+    3) Reorganization of counts
+    4) Pivot long for totals
+    5) Reformatting values
+    6) Changing column headers
+    7) Additional organization by larval grouping
+  
+- Manual cleaning of this data set included:
+    1) Combining specimen and live star measurements
+    2) Removing any data points that had NA measurements/counts
+
+- Manual cleaning of the larval growth data set included:
+    1) transitioning from wide to long format
+    2) assigning density based on tank (ie. 1 larv/mL to AHQ15)
+    3) Grouping together cone and bucket to 15-20 larvae/mL
+```{r data import, include=FALSE}
+## Fitness data set (experiments from 2/13/25 to 2/25/25)
+fitness <- read.csv("Fitness Test.csv")
+
+
+## Growth data (from measurements and counts taken 12/31/24 to 1/2/25)
+growth <- read.csv("Growth Cruves Dec to Feb.csv") #wide format data
+growth_combined <- read.csv("growth curves 2.csv") #long format data
+
+
+## Settlement data (from settlement counts 3/26/24 to 7/9/24)
+settlement_raw_wide <- read.csv("Settlement raw counts wide.csv")
+settlement_raw_long <- read.csv ("Settlement raw count long.csv")
+settlement_total <- read.csv("Settlement total counts.csv")
+settlement_cohort <- read.csv("Settlement cupid cohort.csv")
+juvenile_settlement <- read.csv("Juvenile settlment survival.csv")
+
+
+## Specimen Measurements (from Measurements done on 7/7/2025 to 7/9/2025)
+specimens <- read.csv("Pycnopodia specimen measurements.csv")
+specimens_alive <- read.csv("Pycnopodia specimen measurements - Live Stars.csv")
+
+
+## Larval growth data collected from ImageJ measurements taken of larvae DPF 4-47
+larval_growth <- read.csv("Larval Growth Curves.csv")
+
+```
+
+```{r data cleaning, include = FALSE}
+## Fixing measurements, dates, and times with lubridate
+#growth data
+growth$Measurement_date_1 <- mdy(growth$Measurement_date_1) #jan sampling
+class(growth$Measurement_date_1) #check it worked, output should be "date"
+
+growth$Measurement_date_2 <- mdy(growth$Measurement_date_2) #repeat for Feb sampling
+class(growth$Measurement_date_2) 
+
+#fitness data
+fitness$Flip_time_seconds <- period_to_seconds(hms(fitness$Flip_time)) #time as seconds vs hms
+
+fitness$Flip_time <- hms(fitness$Flip_time)
+fitness$Flip_time <- hms::hms(fitness$Flip_time) #time as hours, mins, seconds
+class(fitness$Flip_time) #should be hms, difftime
+
+#Re-coding Density variable to make it better for plots
+fitness$Densities <- factor(
+  fitness$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+#settlement data
+settlement_raw_wide$Date <- mdy(settlement_raw_wide$Date) 
+class(settlement_raw_wide$Date) 
+
+settlement_raw_long$Date <- mdy(settlement_raw_long$Date)
+class(settlement_raw_long$Date)
+
+#specimen data
+specimens$Date_measured <- mdy(specimens$Date_measured)
+class(specimens$Date_measured)
+```
+
+## Summary tables - fitness
+Used summary information here to guide questions, later visualizations, and analyses. 
+```{r tables, include=FALSE}
+## How many surviving stars were there from each bucket that were tested for the fitness test?
+Group_summary_table <- fitness %>% drop_na(Density, Date) %>% #remove NA obvs
+  group_by(Group) %>%
+  summarise(Individuals = n(), 
+            .groups = 'drop') %>% #.groups allows to group by multiple
+  arrange(desc(Individuals)) #arranging by groups with most observations to least 
+
+Group_summary_table %>% gt() %>% 
+   tab_header(title = md("***P. helianthoides* Tested**"),
+               subtitle = md("Number of surviving individuals from each Larval bucket group"))
+
+
+## Replicates in each treatment group (Density, Settlement Diet, Group)
+#Larval density and diet
+Replicates_summary <- fitness %>% drop_na(Date, Density) %>%
+  group_by(Group, Density, Settlement_diet) %>% 
+  summarise(Replicates = n(), 
+            .groups = 'drop') %>% 
+  arrange(desc(Replicates)) 
+
+Replicates_summary %>% gt() %>% 
+  tab_header(title = md("***P. helianthoides* Tested**"),
+  subtitle = md("Number of replicates within eat experimental group (Settlement diet and larval density)"))
+
+#Density
+Replicates_summary_density <- fitness %>% drop_na(Density) %>%
+  group_by(Density) %>% 
+  summarise(Replicates = n(), 
+            .groups = 'drop') %>% 
+  arrange(desc(Replicates)) 
+
+Replicates_summary_density %>% gt() %>% 
+  tab_header(title = md("***P. helianthoides* Tested**"),
+  subtitle = md("Number of replicates within each density treatment"))
+
+#Settlement diet
+Replicates_summary_diet <- fitness %>% drop_na(Density) %>%
+  group_by(Settlement_diet) %>% 
+  summarise(Replicates = n(), 
+            .groups = 'drop') %>% 
+  arrange(desc(Replicates))  
+
+Replicates_summary_diet %>% gt() %>% 
+  tab_header(title = md("***P. helianthoides* Tested**"),
+  subtitle = md("Number of replicates within each settlement diet treatment"))
+  
+
+
+## What diet had the highest count of NOT eating during the entire experiment?
+No_eating_summary <- fitness %>% 
+  group_by(Settlement_diet, 
+           Ate_hour_8, Ate_hour_24, Ate_hours_48) %>% 
+  filter(Ate_hour_8 %in% c('No'), 
+         Ate_hour_24 %in% c('No'), 
+         Ate_hours_48 %in% c('No')) %>% #only looking at NOT eating
+  summarise(Count = n(), 
+            .groups = 'drop') %>% 
+  mutate(Proportion = Count / sum(Count)*100) %>% 
+  arrange(desc(Count)) 
+No_eating_summary %>% gt()
+
+```
+
+
+## Plotting -- Flip time (fitness data set)
+Exploring results of flip time visually.
+```{r DENSITY and FLIP TIME}
+#working vector for  density/flip exploration
+Density_flip <- fitness %>% drop_na(Densities, Flip_time) 
+
+#without outliers
+Density_flip_no_outliers <- fitness %>% 
+  drop_na(Density, Flip_time_seconds) %>%
+  filter(Flip_time_seconds < 500) #there are 13/87 observations with flip times above 500 seconds
+
+#presentation plot
+ggplot(Density_flip, aes(x = Density, y = Flip_time, fill = Density)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(x="Larval density", y="Flip time", fill="Larval density") +
+  scale_fill_brewer() +
+  theme_clean()
+
+#publication worthy plot
+ggplot(Density_flip, aes(x = Densities, y = Flip_time)) +
+  geom_boxplot() +
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  labs(x="Larval density (/mL)", y="Flip time") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  theme_clean() +
+  theme(legend.position = "none", 
+        axis.title.x = element_blank())
+
+#plot (without outliers)
+ggplot(Density_flip_no_outliers, aes(x=Density, y=Flip_time_seconds, fill=Density)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(x="Larval density", y="Flip time (seconds)", fill="Larval density") +
+  scale_fill_brewer() +
+  theme_bw()
+
+#descriptive stats
+Mean_density_flip <- Density_flip %>% group_by(Density) %>% #w/ outliers
+  summarise(mean = (mean(Flip_time)/60))
+Mean_density_flip
+
+Mean_density_flip_2 <- Density_flip_no_outliers %>% group_by(Density) %>% #w/out outliers
+  summarise(mean = (mean(Flip_time)/60))
+Mean_density_flip_2
+
+#largest and smallest flip_time
+min(Density_flip$Flip_time) #fastest flip was 49 seconds
+max(Density_flip$Flip_time) #slowest flip was 30 minutes
+max(Density_flip_no_outliers$Flip_time) #slowest flip w/out outliers was 8 minutes
+
+#violin plot
+ggplot(Density_flip, aes(x = Densities, y = Flip_time, fill = Densities)) +
+  geom_violin() +
+  geom_jitter(aes(shape = Densities)) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  theme_bw()
+```
+
+```{r DIET and FLIP TIME}
+#working vector (w/ outliers)
+Settlement_flip <- fitness %>% drop_na(Settlement_diet, Flip_time)
+
+#removing outliers
+Settlement_flip_no_outliers <-  fitness %>% drop_na(Settlement_diet, Flip_time_seconds) %>%
+  filter(Flip_time_seconds < 500) 
+
+#plot 1, with outliers
+ggplot(Settlement_flip, aes(x = Settlement_diet, y = Flip_time, fill = Settlement_diet)) +
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(x="Settlement diet", y="Flip time", fill="Settlement Diet") + 
+  scale_fill_brewer() +
+  theme_bw()
+
+#plot 2, same thing, without outliers
+ggplot(Settlement_flip_no_outliers, aes(x=Settlement_diet, y=Flip_time_seconds, fill=Settlement_diet)) + #w/out outliers
+  stat_boxplot(geom = "errorbar", width = 0.2) +
+  geom_boxplot() +
+  labs(x="Settlement diet", y="Flip Time (seconds)", fill="Settlement Diet") +
+  scale_fill_brewer() +
+  theme_bw()
+```
+
+## SICB Poster Plot - LENGTH and FLIP TIME by DENSITY
+```{r LENGTH and FLIP TIME POSTER PLOT}
+fitness_poster <- ggplot(Density_flip, aes(x = Length_mm, y = Flip_time)) +
+  geom_smooth(data = Density_flip, method = lm, formula = y ~ poly(x, 2), 
+              color = "red", se = TRUE) +
+  geom_point(aes(shape = Densities, colour = Densities), size = 2) +
+  scale_shape_manual(values = c(15, 16, 17, 18),
+                     name = "Larval Density") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77"),
+                     name = "Larval Density") +
+  labs(x = "Length (mm)",
+       y = "Flip Time") +
+  theme_classic() +
+  theme(legend.position = 'right')
+
+ggsave('fitness.png', fitness_poster, bg='transparent')
+```
+
+```{r LENGTH and FLIP TIME}
+#working data vectors
+Length_flip <-  fitness %>% drop_na(Length_mm, Flip_time)
+
+Length_flip_no_outliers <- fitness %>% drop_na(Length_mm, Flip_time_seconds) %>%
+  filter(Flip_time_seconds < 500) #no outliers
+
+#plot
+ggplot(Length_flip, aes(x=Flip_time, y=Length_mm)) + 
+  geom_point() +
+  labs(title="Relationship between star length (mm) and Flip time", 
+       x="Flip Time", y="Length (mm)") +
+  geom_smooth(method=lm , color="red", se=TRUE) + #adding linear trend line and SE
+  theme_classic()
+
+#plot, no outliers
+ggplot(Length_flip_no_outliers, aes(x=Flip_time_seconds, y=Length_mm)) + 
+  geom_point() +
+  labs(title="Star Length (mm) and Flip Time (no flip time outliers)", 
+       x="Flip Time (seconds)", y="Length (mm)") +
+  geom_smooth(method=lm , color="red", se=TRUE) + 
+  theme_bw()
+```
+
+
+```{r WEIGHT and FLIP TIME}
+#working vector
+Weight_flip <-  fitness %>% drop_na(Weight_g, Flip_time) 
+
+#plot
+ggplot(Weight_flip, aes(x=Flip_time, y=Weight_g)) +
+  geom_point() +
+  labs(title="Star Weight (g) and Flip Time", 
+       x="Flip Time (seconds)", y="Weight (g)") +
+  geom_smooth(method=lm , color="red", se=TRUE) +
+  theme_bw()
+```
+
+
+```{r ARM COUNT and FLIP TIME}
+Arm_flip <- fitness %>% drop_na(Arm_count, Flip_time) 
+
+#plot
+ggplot(Arm_flip, aes(y = Arm_count, x = Flip_time, size = Arm_count)) +
+  geom_point(alpha = 0.2) +
+  labs(x = "Flip Time", y = "Number of Arms", title = "Flip Time according to the Number of Arms") +
+  theme_bw()
+
+```
+
+
+## Plotting -- Star size metrics (fitness data)
+```{r LENGTH and WEIGHT}
+#working df
+Length_weight <- fitness %>% drop_na(Weight_g, Length_mm, Group)
+
+#plotting by group
+ggplot(Length_weight, aes(x=Length_mm, y=Weight_g, colour=Group)) +
+  geom_point() +
+  geom_smooth(method="lm", 
+              formula= y ~ x + I(x^2), #fitting quadratic line
+              color="black", size = 0.5, se=TRUE) + 
+  labs(x = "Length (mm)", y = "Weight (g)", fill="Larval Bucket Group") +
+  theme_bw()
+
+#mean length and weight by group
+Avg_length_weight <- fitness %>% 
+  drop_na(Weight_g, Length_mm, Group) %>%
+  group_by(Group) %>%
+  summarise(mean_length = mean(Length_mm),
+            mean_weight = mean(Weight_g))
+
+#plotting average length and weight by group
+ggplot(Avg_length_weight, aes(x=mean_length, y=mean_weight, colour=Group)) +
+  geom_point() +
+  geom_smooth(method="lm", formula= y ~ x + I(x^2) ,color="black", size=0.5, se=TRUE) + 
+  labs(x = "Length (mm)", y = "Weight (g)", fill="Larval Bucket Group") +
+  theme_bw()
+
+#weight and length relationship (expected to be fairly linear/exponential)
+ggplot(Length_weight, aes(x = Length_mm, y = Weight_g, 
+                          shape = Densities, colour = Densities)) +
+  geom_point() +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_fill_manual(values = c("#92fe6a", "#68ebff", "#936bff", "#d4646c")) +
+  theme_bw()
+
+#weight and length relationship with specimens
+ggplot(specimens_alive, aes(x = Length_cm, y = Weight_g, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  scale_shape_manual(values = c(15, 16)) +
+  scale_fill_manual(values = c("#92fe6a", "#68ebff")) +
+  theme_bw()
+```
+
+
+```{r DENSITY and LENGTH/WEIGHT}
+##Did any particular larval density lead to bigger/smaller stars? 
+
+#working data vector for length and larval density 
+Density_length <- fitness %>% drop_na(Densities, Length_mm) %>% 
+  group_by(Densities) %>% 
+  summarise(mean = mean(Length_mm), 
+    sd = sd(Length_mm),
+    lowerci = mean(Length_mm) - sd(Length_mm), #calculating intervals for error bars
+    upper = mean(Length_mm) + sd(Length_mm))
+
+#bar graph (density and length)
+ggplot(Density_length) +
+  geom_bar(aes(x = Densities, y = mean), 
+           stat="identity", fill = "#9F68E2") +
+  geom_errorbar(aes(x=Densities, ymin=lowerci, ymax=upper), 
+                width=0.3, colour="black", size=0.5) +
+  labs(x = "Larval Density", y = "Mean Length (mm)") +
+  theme_bw()
+
+#weight and density bar graph
+Density_weight <- fitness %>% drop_na(Density, Weight_g) %>% #dropping NA values
+  group_by(Density) %>% #summarizing length by Density group
+  summarise(
+    mean_weight = mean(Weight_g), #being more descriptive with my variable names now, hooray
+    sd_weight = sd(Weight_g),
+    lower_weight = mean(Weight_g) - sd(Weight_g), 
+    upper_weight = mean(Weight_g) + sd(Weight_g))
+
+#density and weight bar graph 
+ggplot(Density_weight) +
+  geom_bar(aes(x=Density, y=mean_weight), 
+           stat="identity", fill = "#8cc5e3") +
+  geom_errorbar(aes(x=Density, ymin=lower_weight, ymax=upper_weight), 
+                width=0.3, colour="black", size=0.5) + 
+  labs(x= "Larval Density", y = "Mean Weight (g)") +
+  theme_bw()
+```
+
+
+```{r DIET and LENGTH/WEIGHT}
+##Did any particular diet result in bigger/smaller stars?
+
+#LENGTH and DIET bar graph working df
+Diet_weight <- fitness %>% 
+  drop_na(Settlement_diet, Weight_g) %>% 
+  group_by(Settlement_diet) %>% 
+  summarise(mean_weight = mean(Weight_g),
+    sd_weight = sd(Weight_g),
+    lower_weight = mean(Weight_g) - sd(Weight_g), 
+    upper_weight = mean(Weight_g) + sd(Weight_g))
+
+#graph
+Diet_weight_plot <- ggplot(Diet_weight) +
+  geom_bar(aes(x=Settlement_diet, y=mean_weight), 
+           stat="identity", fill = "#f55f74") +
+  geom_errorbar(aes(x=Settlement_diet, ymin=lower_weight, ymax=upper_weight), 
+                width=0.3, colour="black", size=0.5) + #error bars
+  labs(x= "Larval Density", y = "Mean Weight (g)") +
+  theme_bw()
+Diet_weight_plot
+
+#LENGTH and DIET bar graph working df
+Diet_length <- fitness %>% 
+  drop_na(Settlement_diet, Length_mm) %>% 
+  group_by(Settlement_diet) %>% 
+  summarise(mean_length = mean(Length_mm),
+    sd_length = sd(Length_mm),
+    lower_length = mean(Length_mm) - sd(Length_mm), 
+    upper_length = mean(Length_mm) + sd(Length_mm))
+
+#graph
+ggplot(Diet_length) +
+  geom_bar(aes(x=Settlement_diet, y=mean_length), 
+           stat="identity", fill = "#0d7d87") +
+  geom_errorbar(aes(x=Settlement_diet, ymin=lower_length, ymax=upper_length), 
+                width=0.3, colour="black", size=0.5) +
+  labs(x= "Larval Density", y = "Mean Length (mm)") +
+  theme_clean()
+```
+
+
+```{r EATING and LENGTH/WEIGHT}
+##Are smaller stars hungrier? (exploring SIZE and Ate (yes/no))
+Eat_length <- fitness %>% drop_na(Group, Length_mm, Eating)
+
+#density plot
+ggplot(Eat_length, aes(x=Length_mm, fill=Eating)) +
+  geom_density(alpha=0.5) + #alpha=transparency of fill
+  labs(title="Star Length and Eating at Hour 8",
+       x="Length (mm)",
+       y="Frequency") +
+  theme_bw()
+
+#histogram with y-axis as count rather than frequency
+ggplot(fitness, aes(x = Length_mm, fill = Eating)) +
+  geom_histogram(alpha = 0.5, colour = "black", lwd=0.75, linetype = 1) +
+  theme_bw()
+
+#4 different histograms of eat, knit together 
+hour8 <- fitness %>% dplyr::select(Length_mm, Ate_hour_8) %>%
+  filter(Ate_hour_8=='Yes') %>%
+  drop_na(Length_mm, Ate_hour_8)
+
+hour24 <- fitness %>% dplyr::select(Length_mm, Ate_hour_24) %>%
+  filter(Ate_hour_24=='Yes') %>%
+  drop_na(Length_mm, Ate_hour_24)
+
+hour48 <- fitness %>% dplyr::select(Length_mm, Ate_hours_48) %>%
+  filter(Ate_hours_48=='Yes') %>%
+  drop_na(Length_mm, Ate_hours_48)
+
+no_eat <- fitness %>% dplyr::select(Length_mm, Ate_hours_48) %>%
+  filter(Ate_hours_48=='No') %>%
+  drop_na(Length_mm, Ate_hours_48)
+
+#knit 4 plots (base r)
+par(mfrow=c(2,2)) #2 rows and 2 columns of plots
+
+hist(hour8$Length_mm, xlab = "Count", ylab = "Length (mm)", main = "Stars that ate at hour 8", breaks = 10, ylim = c(0,12), xlim = c(0,70))
+
+hist(hour24$Length_mm, xlab = "Count", ylab = "Length (mm)", main = "Stars that ate at hour 24", breaks = 10, ylim = c(0,12), xlim = c(0,70))
+
+hist(hour48$Length_mm, xlab = "Count", ylab = "Length (mm)", main = "Stars that ate at hour 48", breaks = 10, ylim = c(0,12), xlim = c(0,70))
+
+hist(no_eat$Length_mm, xlab = "Count", ylab = "Length (mm)", main = "Stars that did not eat", breaks = 10, ylim = c(0,12), xlim = c(0,70))
+
+par(mfrow=c(1,1)) #reset plot parameters
+```
+
+
+```{r EATING and DIET}
+##Did different diets effect eating?
+Eat_diet <- fitness %>% drop_na(Group, Settlement_diet, Eating) %>%
+  group_by(Settlement_diet, Eating) %>% 
+  tally() %>% 
+  mutate(pct = n/sum(n)) 
+
+#organizing Eating times
+Eat_diet$Eating <- factor(Eat_diet$Eating, 
+                          levels=c('Hour 8', 'Hour 24', 'Hour 48', 'Did not eat'))
+
+#bar plot with raw counts
+ggplot(Eat_diet) + 
+  geom_bar(stat="identity", position="dodge", width = 0.7,
+           aes(x=Settlement_diet, y=n, fill=Eating)) +
+  scale_fill_manual(values= c("#7bb662", "#ffd301", "#E03C32", "#A0A0A0")) +
+  labs(y = "Juveniles that ate (%)", x = "Settlement diet", fill = "Eating Interval")
+  theme_bw() 
+
+
+#bar plot with percent (proportion) to account for kitchen sink bias
+ggplot(Eat_diet) + 
+  geom_bar(stat="identity", position="dodge", width = 0.7,
+           aes(x=Settlement_diet, y=pct, fill=Eating)) +
+  scale_fill_manual(values= c("#7bb662", "#ffd301", "#E03C32", "#A0A0A0")) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() +
+  labs(y = "Juveniles that ate (%)", x = "Settlement diet", fill = "Eating interval") +
+  theme(legend.position = 'top')
+```
+
+
+```{r DIET and ARM COUNT}
+#Did any particular diet result in stars with more/less arms?
+Diet_arm <- fitness %>% drop_na(Settlement_diet, Arm_count) %>%
+  group_by(Settlement_diet, Arm_count) %>% 
+  summarise(Count = n(), .groups = 'drop')
+
+
+ggplot(Diet_arm, aes(x = Settlement_diet, y = Arm_count)) +
+  geom_bar(stat = "identity")
+
+```
+
+
+## Plotting -- percent growth (growth data set)
+
+```{r LENGTH and WEIGHT}
+#(between January and February)
+#relationship between length and weight (December) plot
+Length_weight_plot_1 <- ggplot(growth, aes(x=Length_mm_1, y=Weight_g_1)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", se=TRUE) + 
+  labs(title = "January 2025", x = "Length (mm)", y = "Weight (g)") +
+  theme_bw()
+Length_weight_plot_1
+
+#relationship between length and weight (February) plot
+Length_weight_plot_2 <- ggplot(growth, aes(x=Length_mm_2, y=Weight_g_2)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", se=TRUE) + #add trend line and CE
+  labs(title = "February 2025", x = "Length (mm)", y = "Weight (g)") +
+  theme_bw()
+Length_weight_plot_2
+
+#patchwork, compare
+Length_weight_plot_1 + Length_weight_plot_2
+
+#combine plot, by month
+ggplot(growth_combined, aes(x = Length_mm, y = Weight_g, colour = Measurement_month)) +
+  geom_point() +
+  geom_smooth(method = lm, colour="black", se=TRUE) +
+  labs(x = "Length (mm)", y = "Weight (g)", title = "Size Measurements (January and February)") +
+  scale_colour_manual(values = c("#f55f74", "#8cc5e3")) +
+  theme_clean()
+```
+
+
+```{r pct GROWTH and DIET}
+#percent growth from DEC to FEB
+Percent_growth_summary <- growth %>% 
+  dplyr::select(Settlement_diet, 
+                Length_mm_1, Length_mm_2, 
+                Measurement_date_1, Measurement_date_2) %>% 
+  drop_na() %>% 
+  group_by(Settlement_diet) %>% 
+  mutate(Pct_growth = ((Length_mm_2 - Length_mm_1) / Length_mm_1)) %>% #calc percent growth
+  summarize(mean_growth_length = mean(Pct_growth),
+            min_growth = min(Pct_growth),
+            n_obvs = length(Pct_growth),
+            stdev = sd(Pct_growth, na.rm=T))
+
+#Re-mutate and add additional columns (only way I could get this to work)
+Percent_growth_summary2 <- Percent_growth_summary %>% 
+  mutate(se = stdev/sqrt(n_obvs), #standard error equation: σ (stdev) / √n (# of obs)
+         lower_ci = mean_growth_length - (se), #upper and lower "confidence interval"
+         upper_ci = mean_growth_length + (se)) #not an actual confidence interval, I just use this shorthand to keep track of my upper and lower variables when graphing! 
+
+#graph mean percent growth by diet group from DEC to FEB (with error bars!)
+growth_length_plot <- ggplot(Percent_growth_summary2) +
+  geom_bar(aes(x=Settlement_diet, y=mean_growth_length), 
+           stat="summary", fill= "#8cc5e3") +
+  geom_errorbar(aes(x=Settlement_diet, ymin=lower_ci, ymax=upper_ci), 
+                width=0.4, colour = "black", alpha=1, size=0.5) + #error bar aesthetics <3
+  scale_y_continuous(labels = scales::percent) + #scaling to percentage on y-axis
+  labs(x = "Settlement Diet", y = "Mean Percent Length Growth (mm)") +
+  theme_bw()
+growth_length_plot
+
+#comparing WEIGHT as the growth factor using the same exact methodology/coding as above
+Percent_growth_summary_weight <- growth %>% 
+  dplyr::select(Settlement_diet, 
+                Weight_g_1, Weight_g_2, 
+                Measurement_date_1, Measurement_date_2) %>% 
+  drop_na() %>% 
+  group_by(Settlement_diet) %>% 
+  mutate(Pct_growth = ((Weight_g_2 - Weight_g_1) / Weight_g_1)) %>% 
+  summarize(mean_growth_weight = mean(Pct_growth),
+            min_growth = min(Pct_growth),
+            n_obvs = length(Pct_growth),
+            stdev = sd(Pct_growth, na.rm=T)) #growth mean by Settlement diet
+
+#Re-mutate and add additional columns (a NOT parsimonious way to organize this data... oops)
+Percent_growth_summary_weight2 <- Percent_growth_summary_weight %>% 
+  mutate(se = stdev/sqrt(n_obvs),
+         lower_ci = mean_growth_weight - (se), 
+         upper_ci = mean_growth_weight + (se))  
+
+#graph mean percent growth by diet group from DEC to FEB (with error bars!)
+growth_weight_plot <- ggplot(Percent_growth_summary_weight2) +
+  geom_bar(aes(x=Settlement_diet, y=mean_growth_weight), 
+           stat="summary", fill ="#f55f74") +
+  geom_errorbar(aes(x=Settlement_diet, ymin=lower_ci, ymax=upper_ci), 
+                width=0.4, colour = "black", alpha=1, size=0.5) + 
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Settlement Diet", y = "Mean Percent Weight Growth (g)") +
+  theme_bw()
+growth_weight_plot
+
+#combine and compare weight and length plots
+growth_length_plot + growth_weight_plot
+```
+
+
+```{r WEIGHT/LENGTH and ARM COUNT}
+#length plots
+ggplot(growth_combined, aes(x = Length_mm, y = Arm_count, colour = Measurement_month)) +
+  geom_point() +
+  labs(x = "Lenght (mm)", y = "Number of Arms", colour = "Measurement Month") +
+  scale_colour_manual(values = c("#f55f74", "#8cc5e3")) +
+  theme_bw()
+
+#points where flip time is higher than 500 seconds
+fitness$Highlight <- ifelse(fitness$Flip_time_seconds >= 500, ">=500s", "<500s")
+
+#plot where flip time outliers are highlighted in 
+ggplot(fitness, aes(x = Length_mm, y = Arm_count, colour = Highlight)) +
+  geom_point() +
+  labs(x = "Length (mm)", y = "Number of Arms", colour = "Flip Time") +
+  scale_colour_manual(values = c(">=500s" = "red", "<500s" = "black")) +
+  theme_bw()
+
+#trend lines, by month
+trend_1 <- growth_combined[1:98,] #january measurements
+trend_2 <- growth_combined[99:196,] #febraury measurements
+
+ggplot(growth_combined, aes(x = Length_mm, y = Arm_count, colour = Measurement_month)) +
+  geom_point() +
+  geom_smooth(data = trend_1, 
+              aes(x=Length_mm, y = Arm_count), method = "lm", se = TRUE, color = "lightblue") +
+  geom_smooth(data = trend_2, 
+              aes(x=Length_mm, y = Arm_count), method = "lm", se = TRUE, color = "tomato") +
+  labs(x = "Length (mm)", y = "Number of Arms", colour = "Measurement Month") +
+  scale_colour_manual(values = c("tomato", "lightblue")) +
+  theme_bw()
+
+#weight plots
+ggplot(growth_combined, aes(x = Weight_g, y = Arm_count, shape = Measurement_month)) +
+  geom_point() +
+  labs(x = "Weight_g", y = "Number of Arms", shape = "Measurement Month") +
+  theme_bw()
+
+#trend lines, by month
+ggplot(growth_combined, aes(x = Weight_g, y = Arm_count, shape = Measurement_month)) +
+  geom_point() +
+  geom_smooth(data = trend_1, 
+              aes(x=Weight_g, y = Arm_count), method = "lm", se = TRUE, color = "blue") +
+  geom_smooth(data = trend_2, 
+              aes(x=Weight_g, y = Arm_count), method = "lm", se = TRUE, color = "red") +
+  labs(x = "Weight (g)", y = "Number of Arms", shape = "Measurement Month") +
+  scale_colour_manual(values = c("red", "blue")) +
+  theme_clean()
+```
+
+
+
+
+## Plotting -- Specimen measurements data
+```{r LENGTH and ARM COUNT}
+##Does the length of a star determine how many arms it has? At what length do arms stop developing? 
+specimens <- read.csv("Pycnopodia specimen measurements.csv")
+
+#Re-ordering for plot aesthetics
+specimens$Specimen_type <- factor(
+  specimens$Specimen_type, 
+  levels = c("Cupid Cohort", "Aquarium display", "Specimen"), 
+  labels = c("Cupid cohort", "Alaskan stars", "Museum specimens"))
+
+#length and arms by specimen type
+ggplot(specimens, aes(x = Length_cm, y = Arm_count, 
+                      shape = Specimen_type, colour = Specimen_type)) +
+  geom_point() +
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb")) + 
+  ylim(5, 25) +  #ylim 25
+  labs(x = "Length (cm)", y = "Number of Arms", 
+       shape = "Specimen type", 
+       colour = "Specimen type") +
+  theme_bw() +
+  theme(legend.title = element_markdown())
+```
+
+
+```{r LENGTH and WEIGHT}
+##Are weight and length completely linear between different age classes (juvenile vs. adult)
+
+#regular y-axis
+ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg,
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62")) + 
+  labs(x = "Length (cm)", y = "Weight (kg)", 
+       shape = "*P. helianthoides* specimen type", 
+       colour = "*P. helianthoides* specimen type") + 
+  theme_bw() +
+  theme(legend.title = element_markdown())
+
+#log transform y-axis
+ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  scale_y_log10(breaks = c(0, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 6), 
+                labels = scales::comma_format())  +
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62")) + 
+  geom_smooth(aes(group = 1), color = "red", size = 0.7, se = TRUE) +
+  labs(x = "Length (cm)", y = "Weight (kg, log scale)", 
+       shape = "*P. helianthoides* specimen type", 
+       colour = "*P. helianthoides* specimen type") + 
+  theme_bw() +
+  theme(legend.title = element_markdown())
+```
+
+
+```{r intercative 3d plot LENGTH/WEIGHT and ARM COUNT}
+#interactive 3-d plot
+plot_ly(data = specimens_alive, x = ~Weight_kg, y = ~Length_cm, z = ~Arm_count, 
+        type = "scatter3d", mode = "markers", color = ~Specimen_type, 
+        symbol = ~Specimen_type, 
+        colors = c("Cupid cohort" = "#66c2a5", "Alaskan stars" = "#fc8d62"),
+        marker = list(size = 5)) %>%
+  layout(scene = list(xaxis = list(title = "Weight (kg)"), yaxis = list(title = "Length (cm)"),zaxis = list(title = "Number of Arms")))
+
+test <- specimens_alive
+
+#shapes by specimen type
+shapes = c(16, 17) 
+shapes <- shapes[as.numeric(test$Specimen_type)]
+
+#color by specimen type
+colors = c("#66c2a5", "#fc8d62")
+colors <- colors[as.factor(test$Specimen_type)]
+
+#normal, publishable 3-d plot
+cool_plot <- scatterplot3d(x = test$Length_cm, y = test$Weight_kg, 
+              z = test$Arm_count, color = colors, pch = shapes,
+              xlab = "Weight (kg)", ylab = "Length (cm)", zlab = "Number of Arms", 
+              angle = 45)
+
+#add a legend
+legend(cool_plot$xyz.convert(10, 5, 9.5), legend = c("Alaskan stars", "Cupid cohort"),  
+       col = c("#66c2a5", "#fc8d62"), pch = c(16, 17), title = "Specimen Type") 
+```
+
+
+```{r WEIGHT and ARMS}
+##As above, at what weight does limb development slow? How does this compare in juvnile vs. full-grown stars?
+specimens_alive <- read.csv("Pycnopodia specimen measurements - Live Stars.csv")
+
+#Re-ordering for plot aesthetics
+specimens_alive$Specimen_type <- factor(
+  specimens_alive$Specimen_type, 
+  levels = c("Cupid Cohort", "Aquarium display"), 
+  labels = c("Cupid cohort", "Alaskan stars"))
+
+#Weight and arms plot (aquarium stars and cupid cohort only)
+ggplot(specimens_alive, aes(x = Weight_g, y = Arm_count, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  geom_smooth(aes(group = 1), color = "red", size = 0.7, se = TRUE) +
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62")) + 
+  labs(x = "Weight (g)", y = "Number of Arms", 
+       shape = "*P. helianthoides* specimen type", 
+       colour = "*P. helianthoides* specimen type") + 
+  theme_bw() +
+  theme(legend.title = element_markdown())
+
+#trying the plot with weight in kg to see if visualization improves
+specimens_alive$Weight_kg <- specimens_alive$Weight_g /1000
+
+#re-plot, scale x accordingly
+ggplot(specimens_alive, aes(x = Weight_kg, y = Arm_count, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  scale_x_log10(breaks = c(0, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 6), 
+                labels = scales::comma_format())  +
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62")) + 
+  geom_smooth(aes(group = 1), color = "red", size = 0.7, se = TRUE) +
+  labs(x = "Weight (kg, log scale)", y = "Number of Arms", 
+       shape = "*P. helianthoides* specimen type", 
+       colour = "*P. helianthoides* specimen type") + 
+  coord_cartesian(ylim = c(5, 25)) +
+  theme_bw() +
+  theme(legend.title = element_markdown())
+```
+
+
+
+
+## Non-linear asymptotic model
+- This model assumes that arm count increases with length, but eventually levels off. This is based on visual analysis of the graph above, which is the rationale for why I chose to do a self-starting non-linear model.
+  - Arm count begins near 3.4, grows rapidly, then levels out at ~19 arms. 
+  - lrc is at a constant of -1.9 as it nears the asymptote. 
+  - All three parameters are significant ([Asym p = <2e-16], [R0 p = 5.2e-06], [lrc p = <2e-16]) and the model confidently identifies a saturating relationship between arm count and length, while each parameter contributes meaningfully to the fit of the model. 
+  
+  - A convergence over 6 iterations means the model converges quickly and reliably. Interpretation: As P. helianthoides individuals grow, their number of arms increases quickly early in development but eventually plateaus near 19 arms. The model fits this relationship well, with statistically significant parameters and low prediction error.
+```{r model and plotting}
+Arm_asymp_model <- nls(Arm_count ~ SSasymp(Length_cm, Asym, R0, lrc), data = specimens)
+
+summary(Arm_asymp_model)
+coef(Arm_asymp_model) 
+
+#creating seq of 100 evenly spaced body lengths in the observed body size range 
+length_seq <- seq(min(specimens$Length_cm), max(specimens$Length_cm), length.out = 100)
+
+#create a prediction grid for model from length_seq, usable for later model predictions
+pred_grid <- data.frame(Length_cm = length_seq)
+
+#bootstrap model fits
+set.seed(123)  #for reproducibility, random number seed
+
+#bootstrap model replicates
+n_boot <- 1000
+
+#bootstrap replicate
+boot_preds <- replicate(n_boot, { #drawing bootstrap sample w/ replacement
+  boot_sample <- specimens[sample(1:nrow(specimens), replace = TRUE), ]
+  tryCatch({ #fitting model to each bootstrap sample, predict arm count across all lengths
+    boot_model <- nls(Arm_count ~ SSasymp(Length_cm, Asym, R0, lrc), data = boot_sample)
+    predict(boot_model, newdata = pred_grid)
+  }, error = function(e) rep(NA, length(length_seq)))
+})
+
+#transpose, remove failed fits (NAs)
+boot_preds <- t(boot_preds) #transposes, rows=bootstrap reps; columns=predictions for length
+boot_preds <- boot_preds[complete.cases(boot_preds), ] #remove failed fits
+
+#calculate mean, conf interval
+pred_grid$mean <- apply(boot_preds, 2, mean) #mean prediction at each length
+pred_grid$lower <- apply(boot_preds, 2, quantile, probs = 0.025) #2.5th percentile confint
+pred_grid$upper <- apply(boot_preds, 2, quantile, probs = 0.975) #97.5th percentile confint
+
+#extract model coefs, rounds for notation and reporting on graph
+coef_vals <- coef(Arm_asymp_model) #saving model coefs in coef_vals
+asym <- round(coef_vals["Asym"], 2)
+r0 <- round(coef_vals["R0"], 2)
+lrc <- round(coef_vals["lrc"], 2)
+
+#creating psuedo R2 from residuals of model and prediction grid
+y_pred <- predict(Arm_asymp_model) #predicted y values from model
+y_obs <- specimens$Arm_count #the actual observed arm counts
+rss <- sum((y_obs - y_pred)^2)  #total model error (diff in observed vs predicted values)
+tss <- sum((y_obs - mean(y_obs))^2)  #total variability in data from the mean
+
+#psuedo R2, returning as a result of nrs() not natively calculating this for me :(
+r_squared <- 1 - (rss / tss)
+round(r_squared, 3) #pretty great fit, psuedo R2 = 0.881
+
+#annotate with summary stats
+label_text <- paste0(
+  "Asym = ", asym, "\n",
+  "R0 = ", r0, "\n",
+  "lrc = ", lrc, "\n",
+  "Pseudo R² = ", round(r_squared, 3))
+
+#plot, length and arms by specimen type with self-starting asymp model line
+asym_poster <- 
+  ggplot(specimens, aes(x = Length_cm, y = Arm_count)) +
+  geom_point(aes(colour = Specimen_type, shape = Specimen_type)) + #aesthetics by specimen
+  geom_line(data = pred_grid, aes(x = Length_cm, y = mean), color = "black", size = 0.7) +
+  geom_ribbon(data = pred_grid, aes(x = Length_cm, ymin = lower, ymax = upper),
+              alpha = 0.2, fill = "gray",
+              inherit.aes = FALSE) + #override aes mapping in call to not inherit aes
+  annotate("text", x = 20, y = 10, 
+           label = label_text, hjust = 0, size = 3.5) + #adding summary stats to plot
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb")) +
+  coord_cartesian(ylim = c(5, 25)) +
+  labs(x = "Length (cm)", y = "Number of Arms", shape = "Specimen type",
+    colour = "Specimen type") +
+  theme_classic() +
+  theme(legend.title = element_markdown(),
+        legend.position = 'top') #italicize in legend title
+
+ggsave('asym_model.png', asym_poster, bg='transparent')
+
+#plot no text
+ggplot(specimens, aes(x = Length_cm, y = Arm_count)) +
+  geom_point(aes(colour = Specimen_type, shape = Specimen_type)) + #aesthetics by specimen
+  geom_line(data = pred_grid, aes(x = Length_cm, y = mean), color = "black", size = 0.7) +
+  geom_ribbon(data = pred_grid, aes(x = Length_cm, ymin = lower, ymax = upper),
+              alpha = 0.2, fill = "gray",
+              inherit.aes = FALSE) + #override aes mapping in call to not inherit aes
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb")) +
+  coord_cartesian(ylim = c(5, 25), xlim = c(0,60)) +
+  labs(x = "Length (cm)", y = "Number of Arms", shape = "Specimen type",
+    colour = "Specimen type") +
+  theme_bw() +
+  theme(legend.title = element_markdown()) #italicize in legend title
+```
+
+
+
+## Non-linear allometric growth model, W=a x L^b
+- Where:
+    W is the weight
+    L is the length
+    a is a constant that varies between 
+    b the scaling exponent 
+        - which dictates how weight changes with length
+        - b is also known as the allometric constant
+        - b = 3 indicates isometric growth
+        - 'b<3' means negative allometry
+        - 'b>3' positive allometry
+
+```{r model and plotting}
+#model
+lm_log <- lm(log(Weight_kg) ~ log(Length_cm), data = specimens_alive)
+summary(lm_log)
+
+#back-transform coefficients
+a <- exp(coef(lm_log)[1])
+b <- coef(lm_log)[2]
+b
+
+# Labels
+a_label <- formatC(a, format = "e", digits = 2)
+b_label <- round(b, 2)
+a #4.921003e-05 
+b #2.846814, indicates negative allometry
+
+#bootstrapping
+set.seed(123)
+
+#number of bootstraps 
+n_boot <- 1000
+
+#storing boot coefs
+boot_coefs <- map_dfr(1:n_boot, function(i) {
+  boot_sample <- specimens_alive %>% sample_frac(replace = TRUE) #re-sample
+  boot_model <- lm(log(Weight_kg) ~ log(Length_cm), data = boot_sample) #fit model
+  tibble( #extract and return coefs
+    iter = i,
+    intercept = coef(boot_model)[1],
+    slope = coef(boot_model)[2]
+  )
+})
+
+#back transform coefs
+boot_coefs <- boot_coefs %>%
+  mutate(a = exp(intercept),
+         b = slope)
+
+#summarize w/ confidence intervals
+boot_summary <- boot_coefs %>%
+  summarise(
+    a_mean = mean(a),
+    a_ci_lower = quantile(a, 0.025),
+    a_ci_upper = quantile(a, 0.975),
+    b_mean = mean(b),
+    b_ci_lower = quantile(b, 0.025),
+    b_ci_upper = quantile(b, 0.975))
+
+#summary, printing
+print(boot_summary)
+
+#sequence of Length values to predict over
+length_seq <- seq(min(specimens_alive$Length_cm), max(specimens_alive$Length_cm), length.out = 100)
+
+#generate predicted weight curves for each bootstrap replicate
+boot_lines <- boot_coefs %>%
+  mutate(iter = row_number()) %>%
+  group_by(iter) %>%
+  do({
+    data.frame(
+      Length_cm = length_seq,
+      Weight_kg = exp(.$intercept + .$slope * log(length_seq)))
+  })
+
+boot_lines <- map_dfr(1:nrow(boot_coefs), function(i) {
+  data.frame(
+    Length_cm = length_seq,
+    Weight_kg = exp(boot_coefs$intercept[i] + boot_coefs$slope[i] * log(length_seq)),
+    iter = i)
+  })
+
+#predicted and observed values
+y_pred <- predict(lm_log)
+y_obs <- log(specimens_alive$Weight_kg)
+
+#calculate pseudo-R²
+rss <- sum((y_obs - y_pred)^2)
+tss <- sum((y_obs - mean(y_obs))^2)
+r_squared <- 1 - (rss / tss)
+r2_label <- round(r_squared, 3)
+
+#precomputed back-transformed values
+a_label <- formatC(a, format = "e", digits = 2)
+b_label <- round(b, 2)
+
+label_text <- paste0(
+  "Weight = ", a_label, " × Length^", b_label, "\n",
+  "Pseudo R² = ", r2_label
+)
+
+#adding bootstrapped curves to my plot
+ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  geom_line(data = boot_lines, aes(x = Length_cm, y = Weight_kg),
+            inherit.aes = FALSE, alpha = 0.2, size = 0.2, color = "grey") +
+  stat_function(fun = function(x) a * x^b, color = "black", size = 0.6,
+                inherit.aes = FALSE) +
+  annotate("text", x = 6, y = 2.5,
+           label = label_text, hjust = 0, size = 3.5) +
+  theme_bw() +
+  labs(x = "Length (cm)", y = "Weight (kg)") +
+  coord_cartesian(xlim = c(0,60)) +
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62")) +
+  theme(legend.position = "none")
+
+#non linear model, no text
+ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg, 
+                            colour = Specimen_type, shape = Specimen_type)) +
+  geom_point() +
+  geom_line(data = boot_lines, aes(x = Length_cm, y = Weight_kg),
+            inherit.aes = FALSE, alpha = 0.2, size = 0.2, color = "grey") +
+  stat_function(fun = function(x) a * x^b, color = "black", size = 0.6,
+                inherit.aes = FALSE) +
+  theme_clean() +
+  labs(x = "Length (cm)", y = "Weight (kg)") +
+  coord_cartesian(xlim = c(0,60)) +
+  scale_colour_manual(values = c("#66c2a5", "#fc8d62")) +
+  theme(legend.position = "none")
+```
+
+
+
+
+## Statistical analyses (fitness data)
+Packages used:
+    1) "pastecs" for stat.desc() descriptive statistics in relation to time series (flip time) data
+    2) "car" for leveneTest()
+    3) "rstatix" for dunn_test() and tukey_hsd() post-hoc anal
+    4) "WRS2" for med1way() performing heteroscedastic one-way ANOVA for medians in robust ANOVA testing 
+    5) base r "stats" for kruskal.test() and aov() for primary statistical approaches
+        
+```{r DIET and FLIP TIME}
+##Is there a difference in the mean Flip_time between different settlement diets?
+
+Diet_flip <- fitness %>% 
+  drop_na(Settlement_diet, Flip_time_seconds) %>%
+  group_by(Settlement_diet) %>% 
+   mutate(mean_time = mean(Flip_time_seconds),
+         se = sd(Flip_time_seconds)/sqrt(length((Flip_time_seconds))))
+
+Diet_flip_no_outliers <- fitness %>% 
+  drop_na(Settlement_diet, Flip_time_seconds) %>%
+  filter(Flip_time_seconds < 500) %>%
+  group_by(Settlement_diet) %>% 
+  mutate(mean_time = mean(Flip_time_seconds),
+         se = sd(Flip_time_seconds)/sqrt(length((Flip_time_seconds))))
+
+#visually checking normality of FLIP TIME
+hist(Diet_flip$Flip_time_seconds) #right skew, non normal dist
+qqnorm(Diet_flip$Flip_time_seconds) #right skew, light tailed
+qqline(Diet_flip$Flip_time_seconds)
+
+#visually check differences in mean
+ggplot(Diet_flip, aes(x = Settlement_diet, y = mean_time, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_time - se, ymax = mean_time + se)) +
+  labs(x = "Settlement Diet", y = "Flip Time (seconds)") +
+  theme_bw()
+
+#test normality
+shapiro.test(Diet_flip$Flip_time_seconds) #p = 1.838e-12, not normal
+
+#descriptive stats
+by(Diet_flip$Flip_time_seconds, Diet_flip$Settlement_diet, stat.desc)
+
+#checking variances
+leveneTest(Diet_flip$Flip_time_seconds, Diet_flip$Settlement_diet, center = median)
+##appropriate: p = 0.4559, fulfills assumptions
+
+#checking normality visually (again)
+ggplot(Diet_flip, aes(sample = Flip_time_seconds)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Settlement_diet, scales = "free_y")
+##non-normal in ALL groups
+
+#shapiro.test by group
+test <- Diet_flip %>% dplyr::select(Settlement_diet, Flip_time_seconds) %>%
+  filter(Settlement_diet == "Juv. stars")
+shapiro.test(test$Flip_time_seconds) #juv stars p = 0.01525, NON NORMAL
+
+test <- Diet_flip %>% dplyr::select(Settlement_diet, Flip_time_seconds) %>%
+  filter(Settlement_diet == "Kitchen sink")
+shapiro.test(test$Flip_time_seconds) #kitchen sink, p = <0.01, NON NORMAL
+
+test <- Diet_flip %>% dplyr::select(Settlement_diet, Flip_time_seconds) %>%
+  filter(Settlement_diet == "MLML Urchins")
+shapiro.test(test$Flip_time_seconds) #MLML urchins, p = 0.4, normal
+
+test <- Diet_flip %>% dplyr::select(Settlement_diet, Flip_time_seconds) %>%
+  filter(Settlement_diet == "Worms & Diatoms")
+shapiro.test(test$Flip_time_seconds) #worms and diatoms, p = 0.01
+##3/4 non-normal, proceeding with kruskal-wallis 
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#kruskal-wallis 
+Diet_flip_kruskal <- kruskal.test(Flip_time_seconds ~ Settlement_diet, data = Diet_flip)
+Diet_flip_kruskal #p = 0.5087
+
+#post-hoc tests
+Diet_flip_posthoc <- dunn_test(data = fitness, Flip_time_seconds ~ Settlement_diet, p.adjust.method = "bonferroni")
+Diet_flip_posthoc
+Diet_flip_posthoc <- Diet_flip_posthoc %>% arrange(p.adj)
+Diet_flip_posthoc <- Diet_flip_posthoc %>% add_xy_position(x = "Settlement_diet")
+
+#plot 
+ggboxplot(Diet_flip, x = "Settlement_diet", y = "Flip_time_seconds",
+          color = "Settlement_diet", add = "jitter", shape = "Settlement_diet") + 
+  stat_pvalue_manual(Diet_flip_posthoc, label = "p.adj.signif",hide.ns = TRUE) +
+  stat_compare_means(label.y = 2000) + #add global p-value from KW
+  labs(x = "Settlement Diet", y = "Flip Time (seconds)") +
+  theme(legend.position = "none")
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of settlement diet on star flip time performed during the February fitness test. The Kruskal-Wallis test revealed that there WAS NOT a statistically significant difference in flip time between at least two groups (KW Chi2(3) = 2.32, p = 0.5087)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of flip time was not significantly different between or within any of the diet groups. 
+
+
+```{r DIET and FLIP TIME no outliers}
+##Is there a difference in the mean Flip_time between different settlement diets when excluding the 13 flip time outliers?
+
+Diet_flip_no_outliers <- fitness %>% drop_na(Settlement_diet, Flip_time_seconds) %>%
+  filter(Flip_time_seconds < 500) %>%
+  group_by(Settlement_diet) %>% 
+  mutate(mean_time = mean(Flip_time_seconds),
+         se = sd(Flip_time_seconds)/sqrt(length((Flip_time_seconds))))
+
+#visually checking normality of FLIP TIME
+hist(Diet_flip_no_outliers$Flip_time_seconds) #mostly normal
+qqnorm(Diet_flip_no_outliers$Flip_time_seconds) #light tailed skew
+qqline(Diet_flip_no_outliers$Flip_time_seconds)
+
+#visually check differences in mean
+ggplot(Diet_flip_no_outliers, aes(x = Settlement_diet, y = mean_time, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_time - se, ymax = mean_time + se)) +
+  labs(x = "Settlement Diet", y = "Flip Time (≤500 seconds)") +
+  theme_bw()
+
+#test normality
+shapiro.test(Diet_flip_no_outliers$Flip_time_seconds) #p = 0.0035, still not normal
+
+#descriptive stats
+by(Diet_flip_no_outliers$Flip_time_seconds, Diet_flip_no_outliers$Settlement_diet, stat.desc)
+
+#checking variances
+leveneTest(Diet_flip_no_outliers$Flip_time_seconds, Diet_flip_no_outliers$Settlement_diet, center = median)
+##appropriate: p = 0.589, fulfills assumptions
+
+#checking normality (again)
+ggplot(Diet_flip_no_outliers, aes(sample = Flip_time_seconds)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Settlement_diet, scales = "free_y")
+##deviation in all, light skew in all groups
+
+#shapiro.test by group
+test <- Diet_flip_no_outliers %>% dplyr::select(Settlement_diet, Flip_time_seconds) %>%
+  filter(Settlement_diet == "Juv. stars")
+shapiro.test(test$Flip_time_seconds) #juv stars p = 0.3313
+
+test <- Diet_flip_no_outliers %>% dplyr::select(Settlement_diet, Flip_time_seconds) %>%
+  filter(Settlement_diet == "Kitchen sink")
+shapiro.test(test$Flip_time_seconds) #kitchen sink, p = <0.01, NON NORMAL
+
+test <- Diet_flip_no_outliers %>% dplyr::select(Settlement_diet, Flip_time_seconds) %>%
+  filter(Settlement_diet == "MLML Urchins")
+shapiro.test(test$Flip_time_seconds) #MLML urchins, p = 0.4, normal
+
+test <- Diet_flip_no_outliers %>% dplyr::select(Settlement_diet, Flip_time_seconds) %>%
+  filter(Settlement_diet == "Worms & Diatoms")
+shapiro.test(test$Flip_time_seconds) #worms and diatoms, p = 0.938
+##3/4 are normal, however given between group SW rejecttion, proceeding with kruskal-wallis 
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#kruskal-wallis 
+Diet_flip_no_kruskal <- kruskal.test(Flip_time_seconds ~ Settlement_diet, data = Diet_flip_no_outliers)
+Diet_flip_no_kruskal #p = 0.5898
+
+#ungroup
+Diet_flip_no_outliers <- Diet_flip_no_outliers %>% ungroup()
+
+#post-hoc tests
+Diet_flip_no_posthoc <- dunn_test(data = Diet_flip_no_outliers, Flip_time_seconds ~ Settlement_diet, p.adjust.method = "bonferroni")
+Diet_flip_no_posthoc
+Diet_flip_no_posthoc <- Diet_flip_no_posthoc %>% arrange(p.adj)
+Diet_flip_no_posthoc <- Diet_flip_no_posthoc %>% add_xy_position(x = "Settlement_diet")
+
+### **NEED TO FIX, code currently NOT WORKING ----
+ggboxplot(test, x = "Settlement_diet", y = "Flip_time_seconds",
+          color = "Settlement_diet", add = "jitter", shape = "Settlement_diet") +
+  stat_pvalue_manual(Diet_flip_no_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(label.y = 1000) + #add global p-value from KW
+  labs(x = "Settlement Diet", y = "Flip Time (seconds)")
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of settlement diet on star flip time performed during the February fitness test. The Kruskal-Wallis test revealed that there WAS NOT a statistically significant difference in flip time between at least two groups (KW Chi2(3) = 2.32, p = 0.5087)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of flip time was not significantly different between or within any of the diet groups.
+
+
+```{r DENSITY and FLIP TIME}
+## Is there a difference between larval density groups and flip time?
+
+#working data frame for this question:
+Density_flip <- fitness %>% drop_na(Densities, Flip_time_seconds) %>%
+  group_by(Density) %>% 
+   mutate(mean_time = mean(Flip_time_seconds),
+         se = sd(Flip_time_seconds)/sqrt(length((Flip_time_seconds))))
+
+#visually check differences in mean
+ggplot(Density_flip, aes(x = Density, y = mean_time, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_time - se, ymax = mean_time + se)) +
+  labs(x = "Density", y = "Flip Time (seconds)") +
+  theme_classic2()
+
+#descriptive stats
+by(Density_flip$Flip_time_seconds, Density_flip$Density, stat.desc)
+
+#checking variances
+leveneTest(Density_flip$Flip_time_seconds, Density_flip$Density, center = median)
+##appropriate: p = 0.4529, fulfills assumptions
+
+#checking normality (again)
+ggplot(Density_flip, aes(sample = Flip_time_seconds)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Density, scales = "free_y") 
+##deviation within groups, check normality by group
+
+#shapiro test, by group
+test <- Density_flip %>% dplyr::select(Density, Flip_time_seconds) %>%
+  filter(Density == "1larva/ml")
+shapiro.test(test$Flip_time_seconds) #1 larva/ml p = <0.01, NOT NORMAL
+
+test <- Density_flip %>% dplyr::select(Density, Flip_time_seconds) %>%
+  filter(Density == "2larva/ml")
+shapiro.test(test$Flip_time_seconds) #2 larva/ml p = <0.01, NOT NORMAL
+
+test <- Density_flip %>% dplyr::select(Density, Flip_time_seconds) %>%
+  filter(Density == "5then2larva/ml")
+shapiro.test(test$Flip_time_seconds) #5 then 2 larva/ml p = <0.01, NOT NORMAL
+
+test <- Density_flip %>% dplyr::select(Density, Flip_time_seconds) %>%
+  filter(Density == "Bucket")
+shapiro.test(test$Flip_time_seconds) #bucket p = <0.01, NOT NORMAL
+##all groups not normal, proceed with KW
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#kruskal-wallis 
+Density_flip_kruskal <- kruskal.test(Flip_time_seconds ~ Densities, data = Density_flip)
+Density_flip_kruskal #p = 0.2961
+
+#post-hoc tests
+Density_flip_posthoc <- dunn_test(data = fitness, Flip_time_seconds ~ Densities, p.adjust.method = "bonferroni")
+Density_flip_posthoc
+Density_flip_posthoc <- Density_flip_posthoc %>% arrange(p.adj)
+Density_flip_posthoc <- Density_flip_posthoc %>% add_xy_position(x = "Density")
+
+ggboxplot(Density_flip, x = "Densities", y = "Flip_time_seconds") + 
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  stat_pvalue_manual(Density_flip_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(label.y = 2005) +
+  labs(x = "Larval Density", y = "Flip Time (seconds)") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#68ebff", "#936bff", "#d4646c")) +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of pre-settlement larval density on star flip time--performed during the February fitness test. The Kruskal-Wallis test revealed that there WAS NOT a statistically significant difference in flip time between at least two groups (KW Chi2(3) = 3.6968, p = 0.2961)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of flip time was not significantly different between or within any of the diet groups. 
+
+
+```{r pct GROWTH and DIET}
+##Is there a difference in growth rates between settlement diet (dec to feb)
+
+Growth_diet <- growth %>% 
+  dplyr::select(Settlement_diet, 
+                Length_mm_1, Length_mm_2, 
+                Measurement_date_1, Measurement_date_2) %>% 
+  drop_na(Settlement_diet, Length_mm_1, Length_mm_2) %>% 
+  group_by(Settlement_diet) %>% 
+  mutate(Pct_growth = ((Length_mm_2 - Length_mm_1) / Length_mm_1)*100,
+         mean_growth = mean(Pct_growth),
+         se = sd(Pct_growth)/sqrt(length((Pct_growth)))) %>% #pct growth variable
+  filter(Pct_growth >= 0) #exclude negative growth values, now 83 obvs
+
+#visually check differences in mean
+ggplot(Growth_diet, aes(x = Settlement_diet, y = mean_growth, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_growth - se, ymax = mean_growth + se)) +
+  labs(x = "Settlement Diet", y = "Mean Percent Growth (January to February)") +
+  theme_classic2()
+
+#descriptive stats
+by(Growth_diet$Pct_growth, Growth_diet$Settlement_diet, stat.desc)
+
+#checking variances
+leveneTest(Growth_diet$Pct_growth, Growth_diet$Settlement_diet, center = median)
+##appropriate: p = 0.9389, fulfills assumptions
+
+#checking normality (again)
+ggplot(Growth_diet, aes(sample = Pct_growth)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Settlement_diet, scales = "free_y")
+##deviation within all groups
+
+#shapiro.test by group
+test <- Growth_diet %>% dplyr::select(Settlement_diet, Pct_growth) %>%
+  filter(Settlement_diet == "Kitchen sink")
+shapiro.test(test$Pct_growth) #kitchen sink, p = <0.01, NON NORMAL
+
+test <- Growth_diet %>% dplyr::select(Settlement_diet, Pct_growth) %>%
+  filter(Settlement_diet == "MLML Urchins")
+shapiro.test(test$Pct_growth) #MLML urchins, p = <0.01, NON NORMAL
+
+test <- Growth_diet %>% dplyr::select(Settlement_diet, Pct_growth) %>%
+  filter(Settlement_diet == "Worms & Diatoms")
+shapiro.test(test$Pct_growth) #worms and diatoms, p = 0.01487
+##ALL VARBS non-normal, proceeding with kruskal-wallis 
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#kruskal-wallis 
+Growth_diet_kruskal <- kruskal.test(Pct_growth ~ Settlement_diet, data = Growth_diet)
+Growth_diet_kruskal #p = 0.355
+
+growth <- growth %>% drop_na() %>%
+  mutate(Pct_growth = ((Length_mm_2 - Length_mm_1) / Length_mm_1)*100)
+
+#post-hoc tests
+Growth_diet_posthoc <- dunn_test(data = growth, Pct_growth ~ Settlement_diet, p.adjust.method = "bonferroni")
+Growth_diet_posthoc
+Growth_diet_posthoc <- Growth_diet_posthoc %>% arrange(p.adj)
+Growth_diet_posthoc <- Growth_diet_posthoc %>% add_xy_position(x = "Settlement_diet")
+
+#plotting w result
+ggboxplot(Growth_diet, x = "Settlement_diet", y = "Pct_growth",
+          color = "Settlement_diet", add = "jitter", shape = "Settlement_diet") + 
+  stat_pvalue_manual(Growth_diet_posthoc, label = "p.adj.signif",hide.ns = TRUE) +
+  stat_compare_means(label.y = 200) + #add global p-value from KW
+  labs(x = "Settlement Diet", y = "Percent Growth (January to February)")
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of settlement diet on percent growth from January to February. The Kruskal-Wallis test revealed that there WAS NOT a statistically significant difference in the percent growth between at least two groups (KW Chi2(3) = 3.25, p = 0.355)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of flip time was not significantly different between or within any of the diet groups. 
+
+
+```{r pct GROWTH and DENSITY}
+##Is there a difference in growth rates between larval density treatments (dec to feb)?
+
+Growth_density <- growth %>% 
+  dplyr::select(Density, 
+                Length_mm_1, Length_mm_2, 
+                Measurement_date_1, Measurement_date_2) %>% 
+  drop_na(Density, Length_mm_1, Length_mm_2) %>% 
+  group_by(Density) %>% 
+  mutate(Pct_growth = ((Length_mm_2 - Length_mm_1) / Length_mm_1)*100,
+         mean_growth = mean(Pct_growth),
+         se = sd(Pct_growth)/sqrt(length((Pct_growth)))) %>%
+  filter(Pct_growth >= 0) 
+
+#visually check differences in mean
+ggplot(Growth_density, aes(x = Density, y = mean_growth, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_growth - se, ymax = mean_growth + se)) +
+  labs(x = "Density", y = "Mean Percent Growth (January to February)") +
+  theme_classic2()
+
+#descriptive stats
+by(Growth_density$Pct_growth, Growth_density$Density, stat.desc)
+
+#checking variances
+leveneTest(Growth_density$Pct_growth, Growth_density$Density, center = median)
+##appropriate: p = 0.5826, fulfills assumptions
+
+#checking normality (again)
+ggplot(Growth_density, aes(sample = Pct_growth)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Density, scales = "free_y")
+##deviation in all groups, check by group
+
+#normality between groups
+shapiro.test(Growth_density$Pct_growth)
+
+#shapiro test, by group
+test <- Growth_density %>% dplyr::select(Density, Pct_growth) %>%
+  filter(Density == "1larva/ml")
+shapiro.test(test$Pct_growth) #1 larva/ml p = <0.01, NOT NORMAL
+
+test <- Growth_density %>% dplyr::select(Density, Pct_growth) %>%
+  filter(Density == "2larva/ml")
+shapiro.test(test$Pct_growth) #2 larva/ml p = 0.6915, normal
+
+test <- Growth_density %>% dplyr::select(Density, Pct_growth) %>%
+  filter(Density == "5then2larva/ml")
+#shapiro.test(test$Pct_growth) ,sample to small to calculate? 
+
+test <- Growth_density %>% dplyr::select(Density, Pct_growth) %>%
+  filter(Density == "Bucket")
+#shapiro.test(test$Pct_growth) #error message, assuming non-normal
+##all groups not normal, proceed with KW
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#kruskal-wallis 
+Growth_density_kruskal <- kruskal.test(Pct_growth ~ Density, data = Growth_density)
+Growth_density_kruskal #p = 0.2961
+
+#ungroup for analysis
+Growth_density <- Growth_density %>% ungroup()
+
+#post-hoc tests
+Growth_density_posthoc <- dunn_test(data = Growth_density, Pct_growth ~ Density, p.adjust.method = "bonferroni")
+Growth_density_posthoc
+Growth_density_posthoc <- Growth_density_posthoc %>% arrange(p.adj)
+Growth_density_posthoc <- Growth_density_posthoc %>% add_xy_position(x = "Density")
+
+#plot
+ggboxplot(Growth_density, x = "Density", y = "Pct_growth",
+          color = "Density", add = "jitter", shape = "Density") + 
+  stat_pvalue_manual(Growth_density_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(label.y = 200) + #add global p-value from KW
+  labs(x = "Larval Density", y = "Percent Growth (January to February)")
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of pre-settlement larval density on percent growth between the January and Febrauary measurments. The Kruskal-Wallis test revealed that there WAS NOT a statistically significant difference in flip time between at least two groups (KW Chi2(3) = 4.166, p = 0.2441)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of flip time was not significantly different between or within any of the diet groups. 
+
+
+```{r DESNITY and LENGTH}
+##Did the pre-settlement density impact the growth of settled stars?
+
+fitness$Densities <- factor(
+  fitness$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+#LENGTH df 
+Density_length <- fitness %>% 
+  drop_na(Densities, Flip_time, Flip_time_seconds) %>%
+  group_by(Density) %>% #add descriptive stats by group, w/out removing other data points
+   mutate(mean_length = mean(Length_mm),
+         se = sd(Length_mm)/sqrt(length((Length_mm)))) 
+
+#visually check differences in mean
+ggplot(Density_length, aes(x = Density, y = mean_length, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_length - se, ymax = mean_length + se)) +
+  labs(x = "Larval Density", y = "Mean Length") +
+  theme_classic2()
+
+#descriptive stats
+by(Density_length$Length_mm, Density_length$Density, stat.desc)
+
+#checking variances
+leveneTest(Density_length$Length_mm, Density_length$Density, center = median)
+##appropriate! p = 0.82, fulfills assumptions
+
+#checking normality
+ggplot(Density_length, aes(sample = Length_mm)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Density, scales = "free_y")
+shapiro.test(Density_length$Length_mm)
+
+#shapiro.test by group
+test <- Density_length %>% dplyr::select(Density, Length_mm) %>%
+  filter(Density == "1larva/ml")
+shapiro.test(test$Length_mm) #1 larva/ml p = 0.997
+
+test <- Density_length %>% dplyr::select(Density, Length_mm) %>%
+  filter(Density == "2larva/ml")
+shapiro.test(test$Length_mm) #2 larva/ml p = 0.629
+
+test <- Density_length %>% dplyr::select(Density, Length_mm) %>%
+  filter(Density == "5then2larva/ml")
+shapiro.test(test$Length_mm) #5 then 2 larva/ml p = 0.3097
+
+test <- Density_length %>% dplyr::select(Density, Length_mm) %>%
+  filter(Density == "Bucket")
+shapiro.test(test$Length_mm) #bucket p = 0.4559
+##all approximately normal, assumptions fufilled, proceed with regular ANOVA! 
+
+par(mfrow = c(1, 1))
+
+#anova 
+Density_length_aov <- aov(Length_mm ~ Densities, data = Density_length)
+summary(Density_length_aov) #p = 0.000138***
+plot(Density_length_aov)
+
+#robust anova
+t1way(Length_mm ~ Density, data = Density_length) #default 20%
+##p = 0.00122
+t1way(Length_mm ~ Density, data = Density_length, tr = .1) #trim only 10%
+##p = 0.00079
+med1way(Length_mm ~ Density, data = Density_length)
+##p = 0.001
+
+#post-hoc tests
+Density_length_posthoc <- Density_length_aov %>% tukey_hsd() #tukey's test
+Density_length_posthoc #view results
+
+#work flow for publication-ready plot
+Density_length_posthoc <- Density_length_posthoc %>% arrange(p.adj) #arrange
+Density_length_posthoc <- add_xy_position(test = Density_length_posthoc,
+  data = Density_length %>% as_tibble(.name_repair = "unique"),  #unique column names
+  formula = Length_mm ~ Density, fun = "mean", x = "Densities")
+
+#factor levels in the order used in the plot
+x_levels <- levels(factor(Density_length$Densities))
+
+#vector to convert group names to x-axis positions
+x_map <- setNames(seq_along(x_levels), x_levels)
+
+#map to assign numeric values to xmin and xmax
+Density_length_posthoc <- Density_length_posthoc %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+
+#adjusting y.position to fit the signf brackets
+Density_length_posthoc <- Density_length_posthoc %>% mutate(y.position = y.position + 40)
+Density_length_posthoc$y.position[2] <- 95 #specific y position of 2nd signf bracket
+
+#this plot took so long to trouble shoot.... genuinely... so long... its a MIRACLE it works
+ggboxplot(Density_length, x = "Densities", y = "Length_mm", color = "black") + 
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) +
+  stat_boxplot(geom='errorbar', width = 0.2) +
+  stat_pvalue_manual(Density_length_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 101, label.x = "1 larvae/mL") +
+  labs(x = "Larval density", y = "Length (mm)") +
+  coord_cartesian(ylim = c(0, 105)) +  
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_brewer(type = "qual", palette = 6) +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+report(Density_length_aov)
+```
+A one-way ANOVA was performed to compare the effect of Density on Length (mm).A one-way ANOVA revealed that there WAS a statistically significant difference in Length between at least two groups (F(3, 83) = 7.67, p = <0.001)). Tukey’s HSD Test for multiple comparisons found that the mean value of Length was significantly different between Bucket and 5 then 2 larva/mL (p = 0.002, 95% C.I. = -21.5, -3.5) and significantly different between Bucket and 1 larva/mL (p = <0.001, 95% C.I. = -23.4, -6.4).There was no statistically significant difference between 2 larva/mL and 1 larva/mL/Bucket (p = 0.5 / 0.2) and no statistically significant difference between 5 then 2 larva/mL and 1 larva/mL/2 larva (p = 0.8 / 0.9).
+
+```{r DENSITY and LENGTH POSTER PLOT}
+#LENGTH df 
+Density_length <- fitness %>% 
+  drop_na(Densities, Flip_time, Flip_time_seconds) %>%
+  group_by(Density) %>% #add descriptive stats by group, w/out removing other data points
+   mutate(mean_length = mean(Length_mm),
+         se = sd(Length_mm)/sqrt(length((Length_mm))))
+
+density_length_poster <- ggboxplot(Density_length, x = "Densities", y = "Length_mm", color = "black") + 
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) +
+  stat_boxplot(geom='errorbar', width = 0.2) +
+  stat_pvalue_manual(Density_length_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 101, label.x = "1 larvae/mL") +
+  labs(x = "Larval density", y = "Length (mm)") +
+  coord_cartesian(ylim = c(0, 105)) +  
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+
+density_length_poster +
+  theme(
+    panel.background = element_rect(fill='transparent'), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), #remove major gridlines
+    panel.grid.minor = element_blank(), #remove minor gridlines
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') #transparent legend panel
+  )
+
+ggsave('myplot.png', density_length_poster, bg='transparent')
+```
+
+```{r}
+library(ggpubr)
+library(ggplot2)
+
+density_length_poster <- 
+  ggboxplot(
+    Density_length,
+    x = "Densities",
+    y = "Length_mm",
+    color = "white",     # box outlines in white
+    fill = NA
+  ) +
+  geom_jitter(
+    aes(colour = Densities, shape = Densities),
+    size = 2
+  ) +
+  stat_boxplot(
+    geom = "errorbar",
+    width = 0.2,
+    colour = "white"
+  ) +
+  stat_pvalue_manual(
+    Density_length_posthoc,
+    label = "p.adj.signif",
+    hide.ns = TRUE,
+    color = "white"
+  ) +
+  stat_compare_means(
+    method = "anova",
+    label.y = 101,
+    label.x = "1 larvae/mL",
+    color = "white"
+  ) +
+  labs(
+    y = "Length (mm)",
+    x = NULL
+  ) +
+  coord_cartesian(ylim = c(0, 105)) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme(
+    # transparent backgrounds
+    panel.background = element_rect(fill = "transparent", colour = NA),
+    plot.background  = element_rect(fill = "transparent", colour = NA),
+    legend.background = element_rect(fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent"),
+
+    # remove gridlines
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+
+    # white text everywhere
+    text = element_text(color = "white"),
+    axis.text = element_text(color = "white"),
+    axis.title = element_text(color = "white"),
+
+    # white axes and ticks
+    axis.line = element_line(color = "white"),
+    axis.ticks = element_line(color = "white"),
+
+    legend.position = "none"
+  )
+
+ggsave(
+  filename = "density_length_transparent.png",
+  plot = density_length_poster,
+  bg = "transparent",
+  dpi = 300
+)
+
+```
+
+
+```{r DENSITY and WEIGHT}
+##Did the pre-settlement density impact the growth of settled stars?
+
+#WEIGHT df 
+Density_weight <- fitness %>% 
+  drop_na(Densities, Weight_g) %>%
+  group_by(Densities) %>% 
+   mutate(mean_weight = mean(Weight_g),
+         se = sd(Weight_g)/sqrt(length((Weight_g)))) 
+
+#visually check differences in mean
+ggplot(Density_weight, aes(x = Density, y = mean_weight, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_weight - se, ymax = mean_weight + se)) +
+  labs(x = "Larval Density", y = "Mean Weight") +
+  theme_classic2()
+
+#descriptive stats
+by(Density_weight$Weight_g, Density_weight$Density, stat.desc)
+
+#checking variances
+leveneTest(Density_weight$Weight_g, Density_weight$Density, center = median)
+##appropriate! p = 0.35, fulfills assumptions
+
+#checking normality
+ggplot(Density_weight, aes(sample = Weight_g)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Density, scales = "free_y") +
+  labs(x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_few()
+#deviation in 3/4 of groups, proceed with shapiro to confirm normality 
+
+#shapiro.test by group
+shapiro.test(Density_weight$Weight_g) #p = 3.469e-5, NOT NORMAL
+test <- Density_weight %>% dplyr::select(Density, Weight_g) %>%
+  filter(Density == "1larva/ml")
+
+shapiro.test(test$Weight_g) #1 larva/ml p = 0.00172, NOT NORMAL
+test <- Density_weight %>% dplyr::select(Density, Weight_g) %>%
+  filter(Density == "2larva/ml")
+
+shapiro.test(test$Weight_g) #2 larva/ml p = 0.3793, NORMAL
+test <- Density_weight %>% dplyr::select(Density, Weight_g) %>%
+  filter(Density == "5then2larva/ml")
+
+shapiro.test(test$Weight_g) #5 then 2 larva/ml p = 0.0269, NOT NORMAL
+test <- Density_weight %>% dplyr::select(Density, Weight_g) %>%
+  filter(Density == "Bucket")
+
+shapiro.test(test$Weight_g) #bucket p = 0.01868, NOT NORMAL
+##3/4 not normal, assumptions of normality not fulfilled, proceed with kruskal-wallis
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#kruskal-wallis 
+Density_weight_kruskal <- kruskal.test(Weight_g ~ Densities, data = Density_weight)
+Density_weight_kruskal #p = 0.001987
+
+#post-hoc tests
+Density_weight_posthoc <- dunn_test(data = fitness, Weight_g ~ Densities, p.adjust.method = "bonferroni")
+Density_weight_posthoc
+Density_weight_posthoc <- Density_weight_posthoc %>% arrange(p.adj)
+Density_weight_posthoc <- Density_weight_posthoc %>% add_xy_position(x = "Densities")
+
+#plot
+ggboxplot(Density_weight, x = "Densities", y = "Weight_g", color = "black") + 
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  stat_pvalue_manual(Density_weight_posthoc, label = "p.adj.signif",hide.ns = TRUE) +
+  stat_compare_means(label.y = 16) +
+  labs(x = "Larval Density", y = "Weight (g)") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#68ebff", "#936bff", "#d4646c")) +
+  theme_clean() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+#length plot for comparison
+ggboxplot(Density_length, x = "Densities", y = "Length_mm", color = "black") + 
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) +
+  stat_boxplot(geom='errorbar', width = 0.2) +
+  stat_pvalue_manual(Density_length_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 101, label.x = "1 larvae/mL") +
+  labs(x = "Larval density", y = "Length (mm)") +
+  coord_cartesian(ylim = c(0, 105)) +  
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#68ebff", "#936bff", "#d4646c")) +
+  theme_clean() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of larval density on star weight (g) post-settlement. The Kruskal-Wallis test revealed that there WAS a statistically significant difference in weight between at least two groups (KW Chi2(3) = 14.81, p = 0.002)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of weight was significantly different between Bucket and 5 then 2 larva/mL (p = 0.002) and significantly different between Bucket and 1 larva/mL (p = 0.0004).There was no statistically significant difference between 2 larva/mL and 1 larva/mL and Bucket (p = 0.16 / 0.02) and no statistically significant difference between 5 then 2 larva/mL and 1 larva/mL and 2 larva (p = 0.8 / 0.2).
+
+
+
+```{r DENSITY and ARM COUNT}
+##Did the larval density impact the number of arms a star has?
+
+Density_arm <- fitness %>% 
+  drop_na(Density, Arm_count) %>%
+  group_by(Density) %>% 
+   mutate(mean_arm = mean(Arm_count),
+         se = sd(Arm_count)/sqrt(length((Arm_count)))) 
+
+#visually check differences in mean
+ggplot(Density_arm, aes(x = Density, y = mean_arm, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_arm - se, ymax = mean_arm + se)) +
+  labs(x = "Density", y = "Mean number of arms") +
+  theme_classic2()
+
+#descriptive stats
+by(Density_arm$Arm_count, Density_arm$Density, stat.desc)
+
+#checking variances
+leveneTest(Density_arm$Arm_count, Density_arm$Density, center = median)
+##appropriate! p = 0.63
+
+#checking normality
+ggplot(Density_arm, aes(sample = Arm_count)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Density, scales = "free_y") +
+  labs(x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_few()
+#data is largely bi-modal in distribution
+
+#shapiro.test between and within groups
+shapiro.test(Density_arm$Arm_count) #overall weight, p = 3.469e-05
+
+test <- Density_arm %>% dplyr::select(Density, Arm_count) %>%
+  filter(Density == "1larva/ml")
+shapiro.test(test$Arm_count) #1 larva/ml p = 0.002856, NOT NORMAL
+
+test <- Density_arm %>% dplyr::select(Density, Arm_count) %>%
+  filter(Density == "2larva/ml")
+shapiro.test(test$Arm_count) #2 larva/ml p = 0.151, NORMAL
+
+test <- Density_arm %>% dplyr::select(Density, Arm_count) %>%
+  filter(Density == "5then2larva/ml")
+shapiro.test(test$Arm_count) #5 then 2 larva/ml p = 0.0003, NOT NORMAL
+
+test <- Density_arm %>% dplyr::select(Density, Arm_count) %>%
+  filter(Density == "Bucket")
+shapiro.test(test$Arm_count) #bucket p = 0.1941, NORMAL
+##2/4 not normal, assumptions of normality not fully fulfilled, proceed with kruskal-wallis
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#kruskal-wallis 
+Density_arms_kruskal <- kruskal.test(Arm_count ~ Density, data = Density_arm)
+Density_arms_kruskal #p = 0.1229
+
+#anova, to be robust given normality of 1/2 of groups 
+Density_arms_aov <- aov(Arm_count ~ Density, data = Density_arm)
+summary(Density_arms_aov) #p = 0.203
+plot(Density_arms_aov)
+
+#robust anova
+t1way(Arm_count ~ Density, data = Density_arm) #default 20%
+##p = 0.16899
+t1way(Arm_count ~ Density, data = Density_arm, tr = .1) #trim only 10%
+##p = 0.17096
+med1way(Arm_count ~ Density, data = Density_arm)
+##p = 0.143
+
+#post-hoc tests
+Density_arm_posthoc <- dunn_test(data = fitness, Arm_count ~ Density, p.adjust.method = "bonferroni")
+Density_arm_posthoc
+Density_arm_posthoc <- Density_arm_posthoc %>% arrange(p.adj)
+Density_arm_posthoc <- Density_arm_posthoc %>% add_xy_position(x = "Density")
+
+#plot
+ggboxplot(drop_na(fitness), x = "Density", y = "Arm_count",
+          color = "black", add = "jitter", shape = "Density") + 
+  stat_pvalue_manual(Density_arm_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(label.y = 15) + #add global p-value
+  labs(x = "Larval density", y = "Arm count") +
+  theme(legend.position = "none")
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of the various settlement diet treatments on star weight (g) post-settlement. The Kruskal-Wallis test and anova revealed that there was not a statistically significant difference in weight between at least two groups (KW Chi2(3) = 3.462, p = 0.33)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of weight was no statistically significant difference between any particular settlement diet groups.
+
+
+
+```{r DIET and WEIGHT}
+##Did the post-settlement diet impact the growth of settled stars?
+
+#WEIGHT df, same as previously used diet/weight df, overriding previous work to the df
+Diet_weight <- fitness %>% 
+  drop_na(Settlement_diet, Weight_g) %>%
+  group_by(Settlement_diet) %>% 
+   mutate(mean_weight = mean(Weight_g),
+         se = sd(Weight_g)/sqrt(length((Weight_g)))) 
+
+#visually check differences in mean
+ggplot(Diet_weight, aes(x = Settlement_diet, y = mean_weight, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_weight - se, ymax = mean_weight + se)) +
+  labs(x = "Settlement Diet", y = "Mean Weight") +
+  theme_classic2()
+
+#descriptive stats
+by(Diet_weight$Weight_g, Diet_weight$Settlement_diet, stat.desc)
+
+#checking variances
+leveneTest(Diet_weight$Weight_g, Diet_weight$Settlement_diet, center = median)
+##appropriate! p = 0.35, fulfills assumptions
+
+#checking normality
+ggplot(Diet_weight, aes(sample = Weight_g)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Settlement_diet, scales = "free_y") +
+  labs(x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_few()
+#deviation in 1/4 of groups
+
+#shapiro.test between and within groups
+shapiro.test(Diet_weight$Weight_g) #overall weight, p = 3.469e-05
+
+test <- Diet_weight %>% dplyr::select(Settlement_diet, Weight_g) %>%
+  filter(Settlement_diet == "Juv. stars")
+shapiro.test(test$Weight_g) #juv stars p = 0.7887
+
+test <- Diet_weight %>% dplyr::select(Settlement_diet, Weight_g) %>%
+  filter(Settlement_diet == "Kitchen sink")
+shapiro.test(test$Weight_g) #kitchen sink, p = <0.01, NON NORMAL
+
+test <- Diet_weight %>% dplyr::select(Settlement_diet, Weight_g) %>%
+  filter(Settlement_diet == "MLML Urchins")
+shapiro.test(test$Weight_g) #MLML urchins, p = 0.4, normal
+
+test <- Diet_weight %>% dplyr::select(Settlement_diet, Weight_g) %>%
+  filter(Settlement_diet == "Worms & Diatoms")
+shapiro.test(test$Weight_g) #worms and diatoms, p = 0.9872
+##1/4 not normal, assumptions of normality not fully fulfilled, proceed with both kruskal-wallis and anova to be robust!
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#kruskal-wallis 
+Diet_weight_kruskal <- kruskal.test(Weight_g ~ Settlement_diet, data = Diet_weight)
+Diet_weight_kruskal #p = 0.3257
+
+#anova, as a result of only kitchen sink showing deviation from normality 
+Diet_weight_aov <- aov(Weight_g ~ Settlement_diet, data = Diet_weight)
+summary(Diet_weight_aov) #p = 0.366
+plot(Density_length_aov)
+
+#robust anova
+t1way(Weight_g ~ Settlement_diet, data = Diet_weight) #default 20%
+##p = 0.21566
+t1way(Weight_g ~ Settlement_diet, data = Diet_weight, tr = .1) #trim only 10%
+##p = 0.23943
+med1way(Weight_g ~ Settlement_diet, data = Diet_weight)
+##p = 0.457
+
+#post-hoc tests
+Diet_weight_posthoc <- dunn_test(data = fitness, Weight_g ~ Settlement_diet, p.adjust.method = "bonferroni")
+Diet_weight_posthoc
+Diet_weight_posthoc <- Diet_weight_posthoc %>% arrange(p.adj)
+Diet_weight_posthoc <- Diet_weight_posthoc %>% add_xy_position(x = "Settlement_diet")
+
+#plotting
+ggboxplot(Diet_weight, x = "Settlement_diet", y = "Weight_g",
+          color = "Settlement_diet", add = "jitter", shape = "Settlement_diet") + 
+  stat_pvalue_manual(Diet_weight_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(label.y = 15) + #add global p-value
+  labs(x = "Settlement Diet", y = "Weight (g)")
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of the various settlement diet treatments on star weight (g) post-settlement. The Kruskal-Wallis test and anova revealed that there was not a statistically significant difference in weight between at least two groups (KW Chi2(3) = 3.462, p = 0.33)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of weight was no statistically significant difference between any particular settlement diet groups.
+
+
+
+```{r DIET and LENGTH}
+##Did the post-settlement diet impact the growth of settled stars?
+
+#LENGTH df, exact same workflow as above
+Diet_length <- fitness %>% 
+  drop_na(Settlement_diet, Length_mm) %>%
+  group_by(Settlement_diet) %>% 
+   mutate(mean_length = mean(Length_mm),
+         se = sd(Length_mm)/sqrt(length((Length_mm)))) 
+
+Diet_length_no_outliers <- fitness %>% 
+  drop_na(Settlement_diet, Length_mm) %>%
+  filter(Flip_time_seconds < 500) %>%
+  group_by(Settlement_diet) %>% 
+  mutate(mean_length = mean(Length_mm),
+         se = sd(Length_mm)/sqrt(length((Length_mm)))) 
+
+#visually check differences in mean
+ggplot(Diet_length, aes(x = Settlement_diet, y = mean_length, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(width = 0.1, colour = "blue", 
+                aes(ymin = mean_length - se, ymax = mean_length + se)) +
+  labs(x = "Settlement Diet", y = "Mean Length (mm)") +
+  theme_classic2()
+
+#descriptive stats
+by(Diet_length$Length_mm, Diet_length$Settlement_diet, stat.desc)
+
+#checking variances
+leveneTest(Diet_length$Length_mm, Diet_length$Settlement_diet, center = median)
+##appropriate! p = 0.33, fulfills assumptions
+
+#checking normality
+ggplot(Diet_length, aes(sample = Length_mm)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Settlement_diet, scales = "free_y") +
+  labs(x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_few()
+#deviation in 1/4 of groups (worms and diatoms seems to be bimodal is dist)
+
+#shapiro.test between and within groups
+shapiro.test(Diet_length$Length_mm) #overall weight, p = 0.5018
+
+test <- Diet_length %>% dplyr::select(Settlement_diet, Length_mm) %>%
+  filter(Settlement_diet == "Juv. stars")
+shapiro.test(test$Length_mm) #juv stars p = 0.9154, normal
+
+test <- Diet_length %>% dplyr::select(Settlement_diet, Length_mm) %>%
+  filter(Settlement_diet == "Kitchen sink")
+shapiro.test(test$Length_mm) #kitchen sink, p = 0.3949, normal
+
+test <- Diet_length %>% dplyr::select(Settlement_diet, Length_mm) %>%
+  filter(Settlement_diet == "MLML Urchins")
+shapiro.test(test$Length_mm) #MLML urchins, p = 0.9354, normal
+
+test <- Diet_length %>% dplyr::select(Settlement_diet, Length_mm) %>%
+  filter(Settlement_diet == "Worms & Diatoms")
+shapiro.test(test$Length_mm) #worms and diatoms, p = 0.3751
+##all good here, proceeding with regular and robust anova tests
+
+par(mfrow = c(1, 1)) #reset plot params
+
+#anova, as a result of only kitchen sink showing deviation from normality 
+Diet_length_aov <- aov(Length_mm ~ Settlement_diet, data = Diet_length)
+summary(Diet_length_aov) #p = 0.366
+plot(Diet_length_aov)
+
+#robust anova
+t1way(Length_mm ~ Settlement_diet, data = Diet_length) #default 20%
+##p = 0.07849
+t1way(Length_mm ~ Settlement_diet, data = Diet_length, tr = .1) #trim only 10%
+##p = 0.0998
+med1way(Length_mm ~ Settlement_diet, data = Diet_length)
+##p = 0.128
+
+#post-hoc tests
+Diet_length_posthoc <- Diet_length_aov %>% tukey_hsd() #tukey's test
+Diet_length_posthoc #view results
+
+#work flow for publication-ready plot
+Diet_length_posthoc <- Diet_length_posthoc %>% arrange(p.adj) #arrange
+Diet_length_posthoc <- add_xy_position(test = Diet_length_posthoc,
+  data = Diet_length %>% as_tibble(.name_repair = "unique"),  #unique column names
+  formula = Length_mm ~ Density, fun = "mean", x = "Settlement_diet")
+
+#factor levels in the order used in the plot
+x_levels <- levels(factor(Diet_length$Settlement_diet))
+
+#vector to convert group names to x-axis positions
+x_map <- setNames(seq_along(x_levels), x_levels)
+
+#map to assign numeric values to xmin and xmax
+Diet_length_posthoc <- Diet_length_posthoc %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+
+#adjusting y.position to fit the signf brackets
+Diet_length_posthoc <- Diet_length_posthoc %>% mutate(y.position = y.position + 40)
+Diet_length_posthoc$y.position[2] <- 95 #specific y position of 2nd signf bracket
+
+#now that i know the workflow for this, its a walk in the park
+ggboxplot(Diet_length, x = "Settlement_diet", y = "Length_mm", 
+          color = "Settlement_diet", add = "jitter", shape = "Settlement_diet") + 
+  stat_pvalue_manual(Diet_length_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 100, label.x = "Kitchen sink") +
+  labs(x = "Settlement Diet", y = "Length (mm)") +
+  coord_cartesian(ylim = c(0, 105))  #extend y-axis to fit signf brackets
+
+report(Diet_length_aov)
+```
+A one-way ANOVA was performed to compare the effect of settlement diet treatment on Length (mm).A one-way ANOVA revealed that there was no statistically significant difference in Length between at least two groups (F(3, 83) = 1.55, p = 0.208)). Tukey’s HSD Test for multiple comparisons found that the mean value of Length was not significantly different between any of the settlement diet groups.
+
+
+
+
+## Linear regression(s)
+Asking: how might we be able to apply analysis or statistics to variables in flip time? Could this help us determine a particular trend in linearity between variables? 
+Used base r "stats" package to run lm()
+
+```{r LENGTH and FLIP TIME}
+##Do longer stars flip over slower? 
+
+Size_flip <- fitness %>% 
+  drop_na(Length_mm, Weight_g, Flip_time, Flip_time_seconds)
+
+Size_flip_no_outliers <- fitness %>% 
+  drop_na(Length_mm, Weight_g, Flip_time, Flip_time_seconds) %>%
+  filter(Flip_time_seconds < 1000) #13/88 observations with flip times above 500 seconds
+
+#test normality visually (qq-plot/hist)
+hist(Size_flip$Length_mm) #fairly normal
+hist(Size_flip$Flip_time_seconds) #right skew, non-normal
+qqnorm(Size_flip$Length_mm) #length is normal
+qqnorm(Size_flip$Flip_time_seconds) #flip time is NOT normal
+
+#also check normality numerically with shapiro (just simply for my learning)
+shapiro.test(Size_flip$Length_mm) #p=0.44, no deviation from normality
+shapiro.test(Size_flip$Flip_time_seconds) #p=1.411e-12, HIGH deviation from normality
+
+#running a linear regression model
+Flip_length_lm <- lm(formula = Flip_time_seconds ~ Length_mm, data = Size_flip)
+Flip_length_lm
+summary(Flip_length_lm)
+sqrt(0.03947) #pearson coefficient is = 0.1986
+AIC(Flip_length_lm) #AIC = 1277.18
+
+#flip_time ~ length model diagnostics
+model.diag.metrics <- augment(Flip_length_lm)
+head(model.diag.metrics)
+
+#plotted residuals error (red) between observed values and fitted regression line
+ggplot(model.diag.metrics, aes(Length_mm, Flip_time_seconds)) +
+  geom_point() +
+  stat_smooth(method = lm, se = FALSE) +
+  geom_segment(aes(xend = Length_mm, yend = .fitted), color = "red", size = 0.3) +
+  labs(x = "Length (mm)", y = "Flip Time (seconds)") +
+  theme_classic2()
+```
+Simple linear regression was used to test if Length (mm) significantly predicted P. helianothoides flip time from the February fitness test. The fitted regression model was: [Flip time = 549 x -5.424*(Length)]. The overall regression was statistically insignificant (R2 = 0.039, F(1, 86) = 3.534, p = 0.0635).It was found that length is not an accurate predictor of flip time (β = -5.242, p = 0.0635).
+
+
+```{r WEIGHT and FLIP TIME }
+##Do small stars maneuver or flip faster?
+
+#using same working df's from above question!
+
+#test normality visually (qq-plot/hist)
+hist(Size_flip$Weight_g) #right skew
+qqnorm(Size_flip$Weight_g) #non-normal
+qqline(Size_flip$Weight_g) #non-normal
+
+#confirm with shapiro (we already know Flip time is not normal, given above)
+shapiro.test(Size_flip$Weight_g) #p=0.00007 weight is NOT normal... apparently
+
+#running a linear regression model
+Flip_weight_lm <- lm(formula = Flip_time_seconds ~ Weight_g, data = Size_flip)
+summary(Flip_weight_lm) #p = 0.1189
+sqrt(0.02804) #pearson coefficient is = 0.1674515
+
+#flip_time ~ length model diagnostics
+model.diag.metrics <- augment(Flip_weight_lm)
+head(model.diag.metrics)
+
+#plotted residuals error (red) between observed values and fitted regression line
+ggplot(model.diag.metrics, aes(Weight_g, Flip_time_seconds)) +
+  geom_point() +
+  stat_smooth(method = lm, se = FALSE) +
+  geom_segment(aes(xend = Weight_g, yend = .fitted), color = "red", size = 0.3) +
+  labs(x = "Weight (g)", y = "Flip Time (seconds)") +
+  theme_classic2()
+```
+Weight of a sea-star can account for 2.8% (R2 = 0.028) of the variation in sea-star flip time (given outliers are included in the analysis). This model, similar to the first length model, DOES NOT accurately predict the variation in sea-star flip time given the variation in star length (F=2.481, p=0.1189).
+
+
+```{r WEIGHT and FLIP TIME no outliers}
+#linear regression with NON outlier data
+
+#normality tests with NON outlier data (qq-plot/hist)
+hist(Size_flip_no_outliers$Weight_g) #still right skew
+qqnorm(Size_flip_no_outliers$Weight_g) 
+qqline(Size_flip_no_outliers$Weight_g) #better fit, but still non-normal
+
+#shapiro test
+shapiro.test(Size_flip_no_outliers$Weight_g) #still non-normal without outliers (p = 0.00027)
+
+#regression with NO OUTLIER data
+Flip_weight_lm_2 <- lm(formula = Flip_time_seconds ~ Weight_g, data = Size_flip_no_outliers)
+summary(Flip_weight_lm_2) #signf, (p = 0.002)
+sqrt(0.05619) #pearson coefficient = 0.237
+```
+Weight of a sea-star can account for 5.6% (R2 = 0.05619) of the variation in sea-star flip time (given outliers are NOT included in the analysis). This model, similar to the first CAN accurately predict the variation in sea-star flip time given the variation in star length (F = 4.822, p = 0.03).
+
+
+
+```{r ARM COUNT and FLIP TIME}
+##Does the number of arms a star have correlate to the speed of flip time?
+
+#normality check
+hist(Size_flip$Arm_count) #bi-modal dist
+qqnorm(Size_flip$Arm_count) #VERY bi-modal
+qqline(Size_flip$Arm_count)
+
+#normality test
+shapiro.test(Size_flip$Arm_count) #non-normal, p = 1.3e-5
+
+#regression w/ flip time outliers
+Flip_arms_1 <- lm(formula = Flip_time_seconds ~ Arm_count, data = Size_flip)
+summary(Flip_arms_1)
+sqrt(0.04663) #pearson coef = 0.2159
+```
+Results...
+
+
+```{r ARM COUNT and FLIP TIME no outliers}
+#regression with NON outlier data
+
+#normality check
+hist(Size_flip_no_outliers$Arm_count) 
+qqnorm(Size_flip_no_outliers$Arm_count) #still very bi-modal
+qqline(Size_flip_no_outliers$Arm_count)
+
+#normality test
+shapiro.test(Size_flip_no_outliers$Arm_count) #non-normal, p = 1.924e-5
+
+#regression w/out flip time outliers
+Flip_arms_2 <- lm(formula = Flip_time_seconds ~ Arm_count, data = Size_flip_no_outliers)
+summary(Flip_arms_2)
+
+```
+Results...
+
+
+
+
+## Multiple regression analyses
+```{r checking homo/heteroscedasticity}
+#using same working df's as above, testing for homoscedasticity in predictor variables
+Multi_model_test <- lm(Flip_time_seconds ~ Length_mm + Weight_g + Arm_count + Eating_score + Wellness_score, data = Size_flip) #choosing these 5 predictor variables for the model, checking assumptions below
+
+ncvTest(Multi_model_test) 
+##data is not fulfilling assumptions, showing heteroscedasticity (p= 5.12e-8)
+
+#testing predictors individually
+ncvTest(Multi_model_test, ~ Length_mm) #p=0.16, good
+ncvTest(Multi_model_test, ~ Weight_g) #p=0.62, good
+ncvTest(Multi_model_test, ~ Arm_count) #p= 0.0016, NOT GOOD
+ncvTest(Multi_model_test, ~ Eating_score) #p=7.51e-6, NOT GOOD 
+ncvTest(Multi_model_test, ~ Wellness_score) #p=0.08, good
+ncvTest(Multi_model_test, ~ Length_mm + Weight_g) #p=0.11, good
+ncvTest(Multi_model_test, ~ Length_mm + Weight_g + Arm_count) #p=0.004, NOT GOOD
+ncvTest(Multi_model_test, ~ Length_mm + Weight_g + Wellness_score) #p=0.04, NOT GOOD
+ncvTest(Multi_model_test, ~ Length_mm + Weight_g + Eating_score) #p=1.49e-5, good
+ncvTest(Multi_model_test, ~ Length_mm + Weight_g + Eating_score + Arm_count) #p=1.78e-6, NOT GOOD
+ncvTest(Multi_model_test, ~ Length_mm + Weight_g + Eating_score + Wellness_score) #p=bad
+ncvTest(Multi_model_test, ~ Length_mm + Wellness_score) #p=0.06, good
+ncvTest(Multi_model_test, ~ Weight_g + Wellness_score) #p=0.18, better than length
+ncvTest(Multi_model_test, ~ Weight_g + Wellness_score + Eating_score) #p=bad
+```
+Arm_count AND Eating score are heteroscedastic, therefore will not be included in the model, however wellness score is heteroscedastic when with weight/length
+
+
+
+```{r multiple regression model with FLIP TIME by WEIGHT and WELLNESS SCORE}
+#model without Arm_count, Eating_score, and without Length_mm (given result of heteroscedasticity pairing above)
+Multi_model_1 <- lm(Flip_time_seconds ~ Weight_g + Wellness_score, data = Size_flip)
+summary(Multi_model_1)
+```
+This model can explain 3.5% of the variation in Flip time (R2 = 0.035), as opposed to 3.9% in just the model fit with Length.
+    Non significant model results (F = 1.543, p = 0.2196)
+    No particular parameter is making a significant contribution to the model given Pr(>|t|) all are >0.05
+
+
+```{r model diagnostics}
+#reporting standardized ß measurements
+#lm.beta(Multi_model_1) #code no longer working, ignore for now
+##Given standardized units, as weight increases or changes, flip time will decrease and as Wellness_sore increases, flip time will also increase by units according to the standardized ß scores (Weight_gß = -0.17, Wellness_scoreß = 0.08). 
+
+#confidence intervals of regression model
+confint(Multi_model_1)
+
+#Residuals for multi-model 1 (model with outliers)
+Size_flip$Residuals <- resid(Multi_model_1)
+Size_flip$Standard_residuals <- rstandard(Multi_model_1)
+Size_flip$Studentized_residuals <- rstudent(Multi_model_1)
+Size_flip$Cooks_distance <- cooks.distance(Multi_model_1)
+Size_flip$Df_beta <- dfbeta(Multi_model_1)
+Size_flip$Df_fit <- dffits(Multi_model_1)
+Size_flip$Leverage <- hatvalues(Multi_model_1)
+Size_flip$Covariance_ratios <- covratio(Multi_model_1)
+
+#large residuals search; every case when residual is less than -2 or greater than 
+Size_flip$Large_residuals <- Size_flip$Standard_residuals > 2 | 
+  Size_flip$Standard_residuals < -2 
+sum(Size_flip$Large_residuals) #6 cases with a large residual
+
+#identifying large residuals
+Size_flip[Size_flip$Large_residuals, c("Weight_g", "Wellness_score", "Standard_residuals")] 
+
+#looking at other values where large residuals is TRUE
+Size_flip[Size_flip$Large_residuals, c("Cooks_distance", "Leverage", "Covariance_ratios")] 
+```
+    none of the cooks distance numbers are greater than one, so these cases are not having an undue influence on the model. 
+    No cases have a higher average leverage. 
+    NONE of the cases here have CVR values within the bounds (1.06-0.94). There is undue influence from all of these cases according to the CVR
+
+
+```{r model diagnostics}
+#Durban Watson test of independence
+dwt(Multi_model_1)
+##D-W stat = 1.32, semi-close to 2, and a p = 0.008, so we cannot assume independence ???
+
+#plotting studentized residuals, fitted values, and theoretical values of the model
+Size_flip$Fitted <- Multi_model_1$fitted.values
+
+#histogram with dnorm line
+histogram.residuals <- ggplot(Size_flip, aes(Studentized_residuals)) +
+  geom_histogram(aes(y = ..density..), colour = "black", fill = "white") +
+  labs(x = "Studentized Residuals", y = "Density") +
+  theme_clean()
+histogram.residuals <- histogram.residuals + stat_function(fun = dnorm, args = list(
+  mean = mean(Size_flip$Studentized_residuals, na.rm = TRUE),
+  sd = sd(Size_flip$Studentized_residuals, na.rm = TRUE)), 
+  colour = "red", size = 0.5) +
+  theme_clean()
+
+#Q-Q plot
+qqplot.residuals <- ggplot() +
+  geom_qq(data = Size_flip, aes(sample = Studentized_residuals)) + 
+  labs(x = "Theoretical Values", y = "Observed Values") +
+  theme_clean()
+
+#scatter
+scatter.residuals <- ggplot(Size_flip, aes(Fitted, Studentized_residuals)) +
+  geom_point() + 
+  geom_smooth(method = lm, colour = "blue") +
+  labs(x = "Fitted Values", y = "Stundentized Residual") +
+  theme_clean()
+
+#patchwork graphs for viewing
+histogram.residuals + qqplot.residuals + scatter.residuals
+```
+model is fairly (kinda?) accurate for our population, but this model cannot be generalized to a greater population in better determining responses of sea-stars to environmental stimuli (ie. being pushed upside down, then righting oneself)
+
+
+```{r multiple regression model with FLIP TIME by WEIGHT and WELLNESS SCORE no outliers}
+#Multi model without flip time outliers 
+Multi_model_1_no <- lm(Flip_time_seconds ~ Weight_g + Wellness_score, data = Size_flip_no_outliers)
+summary(Multi_model_1_no)
+```
+This model explains 12.8% in the variation (R2 = 0.165) of Flip time as opposed to 11.2% (R2 = 0.112) variation from just length without flip time outliers simple model. 
+There is a significant relationship in this model (p = 0.007)
+Adjusted R2 is different by xxx, so cross validity of the model is... okay
+
+```{r model diagnostics}
+#standardized beta scores
+#lm.beta(Multi_model_1_no) 
+##Given standardized units, as weight AND wellness score increase or change, flip time will decrease according to the standardized ß scores (Weight_gß = -0.32, Wellness_scoreß = 0.11). 
+
+#confidence intervals of regression model
+confint(Multi_model_1_no)
+
+#Residuals for multi-model 1 (model with outliers)
+Size_flip_no_outliers$Residuals <- resid(Multi_model_1_no)
+Size_flip_no_outliers$Standard_residuals <- rstandard(Multi_model_1_no)
+Size_flip_no_outliers$Studentized_residuals <- rstudent(Multi_model_1_no)
+Size_flip_no_outliers$Cooks_distance <- cooks.distance(Multi_model_1_no)
+Size_flip_no_outliers$Df_beta <- dfbeta(Multi_model_1_no)
+Size_flip_no_outliers$Df_fit <- dffits(Multi_model_1_no)
+Size_flip_no_outliers$Leverage <- hatvalues(Multi_model_1_no)
+Size_flip_no_outliers$Covariance_ratios <- covratio(Multi_model_1_no)
+
+#large residuals search  
+Size_flip_no_outliers$Large_residuals <- Size_flip_no_outliers$Standard_residuals > 2 |
+  Size_flip_no_outliers$Standard_residuals < -2  
+sum(Size_flip_no_outliers$Large_residuals) #5 cases with a large residual vs. 6 WITH outliers
+
+#identifying large residuals
+Size_flip_no_outliers[Size_flip_no_outliers$Large_residuals, 
+                      c("Weight_g", "Wellness_score", "Standard_residuals")]
+Size_flip_no_outliers[Size_flip_no_outliers$Large_residuals, 
+                      c("Cooks_distance", "Leverage", "Covariance_ratios")]
+```
+    none of the cooks distance numbers are greater than one, so these cases are not having an undue influence on the model. 
+    instance 2 has a notable larger cooks distance than the others
+    No cases have a higher average leverage. instance 2 has another high leverage score
+    NONE of the cases here have CVR values within the bounds (1.06-0.94). 
+    There is undue influence from all of these cases according to the CVR, excpet for case 2, which has a CVR = 0.95. 
+
+```{r model diagnostics}
+#Durban Watson test of independence
+dwt(Multi_model_1)
+##D-W stat = 1.32, semi-close to 2, and a p = 0.006, so we cannot assume independence ???
+
+#plotting studentized residuals, fitted values, and theoretical values of the model
+Size_flip_no_outliers$Fitted <- Multi_model_1_no$fitted.values
+
+#histogram with dnorm line
+histogram.residuals <- ggplot(Size_flip_no_outliers, aes(Studentized_residuals)) +
+  geom_histogram(aes(y = ..density..), colour = "black", fill = "white") +
+  labs(x = "Studentized Residuals", y = "Density") +
+  theme_clean()
+histogram.residuals + stat_function(fun = dnorm, args = list(
+  mean = mean(Size_flip_no_outliers$Studentized_residuals, na.rm = TRUE),
+  sd = sd(Size_flip_no_outliers$Studentized_residuals, na.rm = TRUE)), 
+  colour = "red", size = 0.5) +
+  theme_clean()
+
+#Q-Q plot
+qqplot.residuals <- ggplot() +
+  geom_qq(data = Size_flip_no_outliers, aes(sample = Studentized_residuals)) + 
+  labs(x = "Theoretical Values", y = "Observed Values") +
+  theme_clean()
+
+#scatter
+scatter.residuals <- ggplot(Size_flip_no_outliers, aes(Fitted, Studentized_residuals)) +
+  geom_point() + 
+  geom_smooth(method = lm, colour = "blue") +
+  labs(x = "Fitted Values", y = "Stundentized Residual") +
+  theme_clean()
+
+#patchwork graphs for viewing
+histogram.residuals + qqplot.residuals + scatter.residuals
+```
+Again, model is fairly (kinda?) accurate for our population, but this model still cannot be generalized to a greater population (even without extreme cases)
+
+
+
+```{r MLR with FLIP TIME by LENGTH and WELLNESS SCORE}
+Multi_model_2 <- lm(Flip_time_seconds ~ Length_mm + Wellness_score, data = Size_flip)
+summary(Multi_model_2)
+```
+This model can explain 4.7% in the variation (R2 = 0.0477) of Flip time as opposed to 3.5% of the variation in the previous mutli model (flip time ~ weight + wellness score) with outliers. 
+There is NO significant relationship in this model (p = 0.1252)
+Adjusted R2 is different by 0.02241, so cross validity of the model is okay, but still not strong
+
+
+```{r model diagnostics}
+#standardized beta scores
+#lm.beta(Multi_model_2) 
+##Given standardized units, length and wellness score have opposite effects on flip time, as length increases flip time decreases (Length_mmß = -0.21) and as wellness score increases (Wellness_scoreß = 0.09), flip time increases? TBH this is a super weird result and I don't truly trust the validity of this model 
+
+#confidence intervals of regression model
+confint(Multi_model_2)
+##
+
+#Residuals for multi-model 2 (model without outliers)
+Size_flip$Residuals <- resid(Multi_model_2)
+Size_flip$Standard_residuals <- rstandard(Multi_model_2)
+Size_flip$Studentized_residuals <- rstudent(Multi_model_2)
+Size_flip$Cooks_distance <- cooks.distance(Multi_model_2)
+Size_flip$Df_beta <- dfbeta(Multi_model_2)
+Size_flip$Df_fit <- dffits(Multi_model_2)
+Size_flip$Leverage <- hatvalues(Multi_model_2)
+Size_flip$Covariance_ratios <- covratio(Multi_model_2)
+
+#save new data
+write.table(Size_flip, "Multi model 2 with diagnostics.dat", sep = "\t", row.names = FALSE)
+
+#large residuals search  
+Size_flip$Large_residuals <- 
+  Size_flip$Standard_residuals > 2 |
+  Size_flip$Standard_residuals < -2 # 
+sum(Size_flip$Large_residuals) #6 cases with a large residual 
+
+#identifying large residuals
+Size_flip[Size_flip$Large_residuals, 
+                      c("Weight_g", "Wellness_score", "Standard_residuals")]
+Size_flip[Size_flip$Large_residuals, 
+                      c("Cooks_distance", "Leverage", "Covariance_ratios")]
+```
+none of the cooks distance numbers are greater than one, so these cases are not having an undue influence on the model. instance 23 has a notably higher cooks distance than the others
+No cases have a higher average leverage
+NONE of the cases have a CVR value within the bounds (1.06-0.94). 
+There is undue influence from 6 of these cases according to the CVR 
+
+
+```{r model diagnostics}
+#Durban Watson test of independence
+dwt(Multi_model_2)
+##D-W stat = 1.29, semi-close to 2, and a p = 0.004, same value as Multi_model_1
+
+#plotting studentized residuals, fitted values, and theoretical values of the model
+Size_flip$Fitted <- Multi_model_2$fitted.values
+
+#histogram with dnorm line
+histogram.residuals <- ggplot(Size_flip, aes(Studentized_residuals)) +
+  geom_histogram(aes(y = ..density..), colour = "black", fill = "white") +
+  labs(x = "Studentized Residuals", y = "Density") +
+  theme_clean()
+histogram.residuals <- histogram.residuals + stat_function(fun = dnorm, args = list(
+  mean = mean(Size_flip$Studentized_residuals, na.rm = TRUE),
+  sd = sd(Size_flip$Studentized_residuals, na.rm = TRUE)), 
+  colour = "red", size = 0.5) +
+  theme_clean()
+
+#Q-Q plot
+qqplot.residuals <- ggplot() +
+  geom_qq(data = Size_flip, aes(sample = Studentized_residuals)) + 
+  labs(x = "Theoretical Values", y = "Observed Values") +
+  theme_clean()
+
+#scatter
+scatter.residuals <- ggplot(Size_flip, aes(Fitted, Studentized_residuals)) +
+  geom_point() + 
+  geom_smooth(method = lm, colour = "blue") +
+  labs(x = "Fitted Values", y = "Stundentized Residual") +
+  theme_clean()
+
+#patchwork graphs for viewing
+histogram.residuals + qqplot.residuals + scatter.residuals
+```
+Same as above results
+
+
+
+```{r MRM with FLIP TIME by LENGTH and WELLNESS SCORE no outliers}
+Multi_model_2_no <- lm(Flip_time_seconds ~ Length_mm + Wellness_score, data = Size_flip_no_outliers)
+summary(Multi_model_2_no)
+```
+This model can explain 12.5% in the variation (R2 = 0.1254) of Flip time as opposed to the 12.8% of the variation in the previous multi model (flip time ~ weight + wellness score) run without outliers. 
+There is NO significant relationship in this model (p = 0.1252)
+Adjusted R2 is different by 0.02241, so cross validity of the model is okay, but still not strong
+
+
+```{r model diagnostics}
+#standardized beta scores
+#lm.beta(Multi_model_2_no) 
+##Given standardized units, length and wellness score have both negative ß scores (Length_mmß = -0.322) and as wellness score increases (Wellness_scoreß = -0.116)
+
+#confidence intervals of regression model
+confint(Multi_model_2_no)
+
+#Residuals for multi-model 2 (model without outliers)
+Size_flip_no_outliers$Residuals <- resid(Multi_model_2_no)
+Size_flip_no_outliers$Standard_residuals <- rstandard(Multi_model_2_no)
+Size_flip_no_outliers$Studentized_residuals <- rstudent(Multi_model_2_no)
+Size_flip_no_outliers$Cooks_distance <- cooks.distance(Multi_model_2_no)
+Size_flip_no_outliers$Df_beta <- dfbeta(Multi_model_2_no)
+Size_flip_no_outliers$Df_fit <- dffits(Multi_model_2_no)
+Size_flip_no_outliers$Leverage <- hatvalues(Multi_model_2_no)
+Size_flip_no_outliers$Covariance_ratios <- covratio(Multi_model_2_no)
+
+#large residuals search  
+Size_flip_no_outliers$Large_residuals <- Size_flip_no_outliers$Standard_residuals > 2 |
+  Size_flip_no_outliers$Standard_residuals < -2  
+sum(Size_flip_no_outliers$Large_residuals) #4 cases with a large residual 
+
+#identifying large residuals
+Size_flip_no_outliers[Size_flip_no_outliers$Large_residuals, 
+                      c("Weight_g", "Wellness_score", "Standard_residuals")]
+Size_flip_no_outliers[Size_flip_no_outliers$Large_residuals, 
+                      c("Cooks_distance", "Leverage", "Covariance_ratios")]
+```
+none of the cooks distance numbers are greater than one, so these cases are not having an undue influence on the model. instance 2 and 42 have notably higher ratios than the other values
+No cases have a higher average leverage
+NONE of the cases have a CVR value within the bounds (1.06-0.94) but instance 2 and 42 have higher values (approaching 0.95). There is undue influence from 2/4 of these cases according to the CVR 
+
+
+```{r model diagnostics}
+#Durban Watson test of independence
+dwt(Multi_model_2_no)
+##D-W stat = 1.59, much closer to 2 than any of the other models, and a p = 0.064, so independence is not assumed and likely violated
+
+#still plotting studentized residuals, fitted values, and theoretical values of the model to assess fit of residuals 
+Size_flip_no_outliers$Fitted <- Multi_model_2_no$fitted.values
+
+#histogram with dnorm line
+histogram.residuals <- ggplot(Size_flip_no_outliers, aes(Studentized_residuals)) +
+  geom_histogram(aes(y = ..density..), colour = "black", fill = "white") +
+  labs(x = "Studentized Residuals", y = "Density") +
+  theme_clean()
+histogram.residuals <- histogram.residuals + stat_function(fun = dnorm, args = list(
+  mean = mean(Size_flip_no_outliers$Studentized_residuals, na.rm = TRUE),
+  sd = sd(Size_flip_no_outliers$Studentized_residuals, na.rm = TRUE)), 
+  colour = "red", size = 0.5) +
+  theme_clean()
+
+#Q-Q plot
+qqplot.residuals <- ggplot() +
+  geom_qq(data = Size_flip_no_outliers, aes(sample = Studentized_residuals)) + 
+  labs(x = "Theoretical Values", y = "Observed Values") +
+  theme_clean()
+
+#scatter
+scatter.residuals <- ggplot(Size_flip_no_outliers, aes(Fitted, Studentized_residuals)) +
+  geom_point() + 
+  geom_smooth(method = lm, colour = "blue") +
+  labs(x = "Fitted Values", y = "Stundentized Residual") +
+  theme_clean()
+
+#patchwork graphs for viewing
+histogram.residuals + qqplot.residuals + scatter.residuals
+```
+
+
+## Plotting -- settlement data
+```{r cumulative SETTLEMENT overtime}
+#fixing labeling for plots
+settlement_raw_long$Densities <- factor(
+  settlement_raw_long$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+#cumulative settlement by larval density, df 
+Density_settlement <- settlement_raw_long %>% 
+  group_by(Densities, DPF) %>% #initially group by DPF and density
+  summarise(Settlers = sum(Settlers)) %>% #sum the settler count by day for each density
+  arrange(Densities, DPF) %>% #arrange df by density and DPF
+  group_by(Densities) %>% #cumulative sum only by density 
+  mutate(Cum_sum = cumsum(Settlers)) #cumulative sum by density group over-time
+
+#line plot!
+ggplot(Density_settlement, aes(x = DPF, y = Cum_sum, colour = Densities)) +
+  geom_line(size = 0.7) +
+  labs(x = "Days post fertilization (DPF)",y = "Approximate larval settlers", 
+       colour = "Larval density") +
+  scale_color_manual(values = c("#92fe6a", "#68ebff", "#936bff", "#d4646c")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_bw()
+
+#cum settlement by density normalized according to # of replicates in density groups
+replicate_counts <- c("1 larvae/mL" = 8, #replicates in each density trtment
+                      "2 larvae/mL" = 4, 
+                      "5 larvae/mL" = 4, 
+                      "15-20 larvae/mL" = 4)
+
+#working df
+Density_settlement_normalized <- settlement_raw_long %>%
+  group_by(Densities, DPF) %>% #summarize by density and DPF
+  summarise(Daily_settlers = sum(Settlers), .groups = "drop") %>% #sum by daily settlers
+  arrange(Densities, DPF) %>% #rearrange df
+  group_by(Densities) %>% #calculate and mutate by density groups
+  mutate(Cum_sum = cumsum(Daily_settlers),
+    Normalized_cum_sum = Cum_sum / replicate_counts[Densities]) #divide cumsum by # replicates
+
+#plot
+ggplot(Density_settlement_normalized, aes(x = DPF, y = Normalized_cum_sum, colour = Densities)) +
+  geom_line(size = 0.7) +
+  labs(x = "Days post fertilization (DPF)", y = "Normalized cumulative daily settlement",
+       colour = "Larval density") +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_bw()
+
+#Surviving Juveniles in cohort overtime, df
+test <- settlement_cohort %>% arrange(match(Date_interval, c("Month 3", "Month 6", "Month 9", "Month 12", "Month 15")))
+```
+
+```{r normalized CUMULATIVE settlement POSTER PLOT}
+normalized_settlement_poster <- 
+  ggplot(Density_settlement_normalized, 
+         aes(x = DPF, y = Normalized_cum_sum, colour = Densities)) +
+  geom_line(size = 0.7) +
+  labs(x = "Days post fertilization (DPF)", 
+       y = "Normalized cumulative daily settlement",
+       colour = "Larval Density") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme(legend.position = 'top',
+        panel.background = element_rect(fill='transparent'), #transparent panel bg
+        plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+        panel.grid.major = element_blank(), #remove major gridlines
+        panel.grid.minor = element_blank(), #remove minor gridlines
+        legend.background = element_rect(fill='transparent'), #transparent legend bg
+        legend.box.background = element_rect(fill='transparent')) +
+  theme_classic() +
+  theme(legend.position = 'top')
+
+ggsave('normalized_settlement.png', normalized_settlement_poster, bg='transparent')
+```
+
+```{r}
+normalized_settlement_poster <- 
+  ggplot(
+    Density_settlement_normalized,
+    aes(x = DPF, y = Normalized_cum_sum, colour = Densities)
+  ) +
+  geom_line(size = 0.7) +
+  labs(
+    x = "Days post fertilization (DPF)",
+    y = "Normalized cumulative daily settlement",
+    colour = "Larval Density"
+  ) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme(
+    # transparent backgrounds
+    panel.background = element_rect(fill = "transparent", colour = NA),
+    plot.background  = element_rect(fill = "transparent", colour = NA),
+    legend.background = element_rect(fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent"),
+
+    # remove gridlines
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+
+    # white text everywhere
+    text = element_text(color = "white"),
+    axis.text = element_text(color = "white"),
+    axis.title = element_text(color = "white"),
+    legend.text = element_text(color = "white"),
+    legend.title = element_text(color = "white"),
+
+    # axes lines and ticks in white (important on dark backgrounds)
+    axis.line = element_line(color = "white"),
+    axis.ticks = element_line(color = "white"),
+
+    legend.position = "top"
+  )
+
+ggsave(
+  filename = "normalized_settlement_transparent.png",
+  plot = normalized_settlement_poster,
+  bg = "transparent",
+  dpi = 300
+)
+```
+
+
+```{r survivorship by DENSITY}
+survivorship <- settlement_total
+
+#density labels for plot
+survivorship$Densities <- factor(
+  survivorship$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+#plot
+ggplot(survivorship, aes(x = Densities, y = Survivorship, 
+                         shape = Densities)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot() +
+  geom_jitter(aes(colour = Densities)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177")) +
+  theme_classic2() +
+  theme(legend.position = "none")
+```
+
+
+
+
+
+## Statistical analysis -- settlement and survival (settlement data)
+```{r DENSITY and SETTLEMENT}
+##Did the pre-settlement density impact the number of settled stars?
+
+Density_settlement_normalized_group <- settlement_raw_long %>%
+  group_by(Densities, DPF, Group) %>% 
+  summarise(Daily_settlers = sum(Settlers), 
+            .groups = "drop") %>%
+  arrange(Densities, DPF) %>%
+  group_by(Group) %>% 
+  mutate(Cum_sum = cumsum(Daily_settlers),
+    Normalized_cum_sum = Cum_sum / replicate_counts[Densities])
+
+#df for tests
+Normalized_sum <- Density_settlement_normalized_group %>% 
+  dplyr::filter(DPF >= 146) %>%
+  group_by(Densities) %>%
+  mutate(se = sd(Normalized_cum_sum)/sqrt(length(Normalized_cum_sum)))
+
+#mean for below graph
+Normalized_mean_sum <- Density_settlement_normalized_group %>% 
+  dplyr::filter(DPF >= 146) %>%
+  group_by(Densities) %>%
+  summarise(Mean_settle = mean(Normalized_cum_sum),
+            se = sd(Normalized_cum_sum)/sqrt(length(Normalized_cum_sum)))
+
+#visually check differences in mean
+ggplot(Normalized_mean_sum, aes(x = Densities, y = Mean_settle, group = 1)) +
+  geom_line() +
+  geom_point() +
+  geom_jitter(data = Normalized_sum, aes(y = Normalized_cum_sum, 
+                                         colour = Densities, shape = Densities)) +
+  geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = Mean_settle - se, ymax = Mean_settle + se)) +
+  labs(x = "Larval Density", y = "Mean normalized cumulative settlement") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177"))  +
+  theme_bw() +
+  theme(axis.title.x = element_blank())
+
+by(Normalized_sum$Normalized_cum_sum, Normalized_sum$Densities, stat.desc)
+
+leveneTest(Normalized_sum$Normalized_cum_sum, Normalized_sum$Densities, center = median) #appropriate, p = 0.88
+
+ggplot(Normalized_sum, aes(sample = Normalized_cum_sum)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Densities, scales = "free_y") +
+  theme_minimal()
+
+shapiro.test(Normalized_sum$Normalized_cum_sum) 
+#p = 0.623, overall normal, proceed with anova also given normality from NON normalized data
+
+#ANOVA
+Density_settlement_normal_aov <- aov(Normalized_cum_sum ~ Densities, data = Normalized_sum)
+summary(Density_settlement_normal_aov) #p = 0.000431
+plot(Density_settlement_normal_aov)
+
+#robust anova
+t1way(Normalized_cum_sum ~ Densities, data = Normalized_sum) #default 20%
+##p = 0.01
+t1way(Normalized_cum_sum ~ Densities, data = Normalized_sum, tr = .1) #trim only 10%
+##p = 0.006
+med1way(Normalized_cum_sum ~ Densities, data = Normalized_sum)
+##p = 0.008
+
+Density_settlement_normal_posthoc <- Density_settlement_normal_aov %>% tukey_hsd()
+Density_settlement_normal_posthoc #view results
+
+Density_settlement_normal_posthoc <- Density_settlement_normal_posthoc %>% arrange(p.adj)
+Density_settlement_normal_posthoc <- add_xy_position(test = Density_settlement_normal_posthoc,
+  data = Normalized_sum %>% as_tibble(.name_repair = "unique"),  #unique column names
+  formula = Normalized_cum_sum ~ Densities, fun = "mean", x = "Densities")
+
+x_levels <- levels(factor(Normalized_sum$Densities))
+
+x_map <- setNames(seq_along(x_levels), x_levels)
+
+Density_settlement_normal_posthoc <- Density_settlement_normal_posthoc %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+
+Density_settlement_normal_posthoc <- Density_settlement_normal_posthoc
+Density_settlement_normal_posthoc$y.position[1] <- 630 
+Density_settlement_normal_posthoc$y.position[2] <- 570
+
+#this plot took so long to trouble shoot.... genuinely... so long... its a MIRACLE it works
+ggboxplot(Normalized_sum, x = "Densities", y = "Normalized_cum_sum", 
+          color = "black", shape = "Densities") + 
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_jitter(aes(x = Densities, y = Normalized_cum_sum, 
+                  color = Densities, shape = Densities),
+              data = Normalized_sum, width = 0.2, alpha = 0.6, size = 2) +
+  stat_pvalue_manual(Density_settlement_normal_posthoc, 
+                     label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 680, label.x = "1 larvae/mL") +
+  labs(x = "Larval density", y = "Normalized cumulative settlement") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177"))  +
+  coord_cartesian(ylim = c(0, 700)) +  #extend y-axis to fit signf brackets
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+report(Density_settlement_normal_aov)
+```
+A one-way ANOVA was performed to compare the effect of Density on cumulative larval settlement.A one-way ANOVA revealed that there was a statistically significant difference in cumulative settlement of larvae between at least two groups (F(3, 16) = 10.65, p = <0.01)). Tukey’s HSD Test for multiple comparisons found that the mean value of Length was statistically significantly different between the 1 larva/mL and the 5 and 15-20 groups.
+
+
+```{r DENSITY and SURVIVORSHIP kruskal}
+##Did different larval densities have different levels of survivorship to settlement?
+##Given that: each group is in an 8L container and larval densities are approximate, not precise.
+
+#density labels for plot
+survivorship$Densities <- factor(
+  survivorship$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+#calculate survivorship as % rather than decimal
+survivorship$Survivorship <- survivorship$Survivorship * 100
+
+#descriptive stats
+#by(survivorship$Survivorship, survivorship$Densities, stat.desc) 
+##mean/sd:
+#1 larva/ml = 13.11% / 8.4
+#2 larva/ml = 6.3% / 2.9
+#5 larva/ml = 3.4% / 1
+#Bucket = 1.3% / 0.2
+
+#variance test, levene test
+#leveneTest(survivorship$Survivorship, survivorship$Densities, center = median) 
+#non appropriate, p = 0.01
+
+#checking normality within groups
+ggplot(survivorship, aes(sample = Survivorship)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Density, scales = "free_y")
+shapiro.test(survivorship$Survivorship) #p = <0.01, non-normal
+
+#shapiro.test by group
+test <- survivorship %>% dplyr::select(Density, Survivorship) %>%
+  filter(Density == "1larva/ml")
+shapiro.test(test$Survivorship) #1 larva/ml p = 0.116
+
+test <- survivorship %>% dplyr::select(Density, Survivorship) %>%
+  filter(Density == "2larva/ml")
+shapiro.test(test$Survivorship) #2 larva/ml p = 0.6345
+
+test <- survivorship %>% dplyr::select(Density, Survivorship) %>%
+  filter(Density == "5then2larva/ml")
+shapiro.test(test$Survivorship) #5 then 2 larva/ml p = 0.035, NON NORMAL
+
+test <- survivorship %>% dplyr::select(Density, Survivorship) %>%
+  filter(Density == "Bucket")
+shapiro.test(test$Survivorship) #bucket p = 0.611
+##3/4 normal, do both KW and ANOVA to be robust
+
+Settlement_survivorship_kruskal <- kruskal.test(Survivorship ~ Densities, data = survivorship)
+Settlement_survivorship_kruskal #p = 0.002632
+
+Settlement_survivorship_posthoc <- dunn_test(data = survivorship, Survivorship ~ Densities, p.adjust.method = "bonferroni")
+Settlement_survivorship_posthoc
+
+Settlement_survivorship_posthoc <- Settlement_survivorship_posthoc %>% arrange(p.adj)
+Settlement_survivorship_posthoc <- Settlement_survivorship_posthoc %>% add_xy_position(x = "Density")
+
+#super awesome plot
+ggplot(survivorship, aes(x = Densities, y = Survivorship)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot() +
+  geom_jitter(aes(shape = Densities, colour = Densities)) +
+  stat_pvalue_manual(Settlement_survivorship_posthoc, label = "p.adj.signif", 
+                     hide.ns = TRUE, y.position = "y.position") +
+  stat_compare_means(label.y = 31, label.x = "1 larva/mL") +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177"))  +
+  theme_classic2() +
+  labs(y = "Larval settlement rate (%)") +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank()) 
+
+Settlement_survivorship_kruskal
+```
+A Kruskal-Wallis non-parametric test was performed to compare the effect of larval density on percent survivorship through settlement and metamorphosis. The Kruskal-Wallis test revealed that there WAS a statistically significant difference in weight between at least two groups (KW Chi2(3) = 14.211, p = 0.002)). A non-parametric Dunn's Test for multiple comparisons found that the mean value of weight was significantly different between Bucket and 1 larva/mL (p = 0.002).There was no statistically significant difference between any of the other density treatments.
+
+
+```{r DENSITY and SURVIVORSHIP aov}
+Settlement_survivorship_aov <- aov(Survivorship ~ Densities, data = survivorship)
+summary(Settlement_survivorship_aov) #p = 0.0145
+plot(Settlement_survivorship_aov)
+
+#robust anova
+t1way(Survivorship ~ Density, data = survivorship) #default 20%
+##p = 0.01022*
+t1way(Survivorship ~ Density, data = survivorship, tr = .1) #trim only 10%
+##p = 0.0052**
+med1way(Survivorship ~ Density, data = survivorship)
+##p = 0.008**
+
+#post-hoc tests
+Settlement_survivorship_posthoc_2 <- Settlement_survivorship_aov %>% 
+  tukey_hsd()
+Settlement_survivorship_posthoc_2 #view results
+
+#work flow for publication-ready plot
+Settlement_survivorship_posthoc_2 <- Settlement_survivorship_posthoc_2 %>% arrange(p.adj)
+Settlement_survivorship_posthoc_2 <- add_xy_position(test = Settlement_survivorship_posthoc_2, data = survivorship %>% as_tibble(
+  .name_repair = "unique"), formula = Survivorship ~ Densities, fun = "mean", x = "Densities")
+
+x_levels <- levels(factor(survivorship$Densities))
+
+x_map <- setNames(seq_along(x_levels), x_levels)
+
+Settlement_survivorship_posthoc_2 <- Settlement_survivorship_posthoc_2 %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+
+Settlement_survivorship_posthoc_2 <- Settlement_survivorship_posthoc_2 %>% 
+  mutate(y.position = y.position + 40)
+
+Settlement_survivorship_posthoc_2$y.position[1] <- 27 #specific y position of signf bracket
+
+#anova results on plot
+ggplot(survivorship, aes(x = Densities, y = Survivorship)) +
+  stat_boxplot(geom = 'errorbar', width = 0.5) +
+  geom_boxplot(aes(colour = "black")) +
+  geom_jitter(aes(shape = Densities, colour = Densities)) +
+  stat_pvalue_manual(Settlement_survivorship_posthoc_2, label = "p.adj.signif", 
+                     hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 30) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_fill_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  theme_bw() +
+  labs(y = "% Larvae surviving to settlement") +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+report(Settlement_survivorship_aov)
+```
+A one-way ANOVA was performed to compare the effect of Density on cumulative larval settlement.A one-way ANOVA revealed that there was NOT a statistically significant difference in cumulative settlement of larvae between at least two groups (F(3, 16) = 2.97, p = 0.063)). Tukey’s HSD Test for multiple comparisons found that the mean value of Length was no statistically significantly difference between or within any of the density groups.
+
+```{r DENSITY and SURVIVORSHIP POSTER PLOT}
+density_survivorship_poster <- 
+  ggboxplot(survivorship, x = "Densities", y = "Survivorship") +
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  stat_pvalue_manual(Settlement_survivorship_posthoc_2, label = "p.adj.signif", 
+                     hide.ns = TRUE, y.position = 27) +
+  stat_compare_means(method = "anova", label.y = 30) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  labs(y = "Percent (%) survival to settlement") +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+density_survivorship_poster +
+  theme(
+    panel.background = element_rect(fill='transparent'), #transparent panel bg
+    plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+    panel.grid.major = element_blank(), #remove major gridlines
+    panel.grid.minor = element_blank(), #remove minor gridlines
+    legend.background = element_rect(fill='transparent'), #transparent legend bg
+    legend.box.background = element_rect(fill='transparent') #transparent legend panel
+  )
+
+ggsave('density_survivorship.png', density_survivorship_poster, bg='transparent')
+```
+
+```{r}
+density_survivorship_poster <- 
+  ggboxplot(
+    survivorship,
+    x = "Densities",
+    y = "Survivorship",
+    color = "white",   # ← white box outline
+    fill  = NA         # ← transparent IQR
+  ) +
+  geom_jitter(
+    aes(colour = Densities, shape = Densities),
+    size = 2
+  ) +
+  stat_boxplot(
+    geom = "errorbar",
+    width = 0.2,
+    colour = "white"
+  ) +
+  stat_pvalue_manual(
+    Settlement_survivorship_posthoc_2,
+    label = "p.adj.signif",
+    hide.ns = TRUE,
+    y.position = 27,
+    color = "white"
+  ) +
+  stat_compare_means(
+    method = "anova",
+    label.y = 30,
+    color = "white"
+  ) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  labs(
+    y = "Percent (%) survival to settlement",
+    x = NULL
+  ) +
+  theme(
+    panel.background = element_rect(fill = "transparent", colour = NA),
+    plot.background  = element_rect(fill = "transparent", colour = NA),
+    legend.background = element_rect(fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent"),
+
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+
+    text = element_text(color = "white"),
+    axis.text = element_text(color = "white"),
+    axis.title = element_text(color = "white"),
+
+    legend.position = "none"
+  )
+
+
+ggsave(
+  filename = "density_survivorship_transparent.png",
+  plot = density_survivorship_poster,
+  bg = "transparent",
+  dpi = 300
+)
+```
+
+
+```{r GAM of SETTLEMENT by DENSITY over DPF non normalized}
+##Do daily settlement rates differ by density groups over time?
+
+Settlement_dpf <- settlement_raw_long %>%
+  mutate(Density = as.factor(Density),
+         Group = as.factor(Group),
+         Settlers = as.integer(Settlers), 
+         DPF_scaled = scale(DPF)) 
+
+#GAM 
+Settler_gam_model <- gam(Settlers ~ s(DPF, by = Density) + Density, 
+                 family = nb(), data = Settlement_dpf)
+summary(Settler_gam_model)
+
+#new df for settlement prediction across DPF range for each density group
+new_data <- Settlement_dpf %>% group_by(Density) %>%
+  reframe(DPF = seq(min(DPF), max(DPF), length.out = 100)) 
+
+#adding the predicted fits on a response scale
+new_data$Predicted <- predict(Settler_gam_model, newdata = new_data, type = "response")
+
+#plot it
+ggplot(Settlement_dpf, aes(x = DPF, y = Settlers, color = Density)) +
+  geom_point(alpha = 0.4) +
+  geom_line(data = new_data, aes(x = DPF, y = Predicted, color = Density), size = 1.2) +
+  labs(title = "GAM-Predicted Larval Settlement Trajectories by Density",
+       y = "Daily Settler Count (Observed + Predicted)",
+       x = "Days Post Fertilization") +
+  theme_minimal(base_size = 14)
+
+#plot GAM smooths apart from graphed data
+plot(Settler_gam_model, pages = 1, se = TRUE, shade = TRUE)
+```
+
+
+
+```{r GAM of SETTLEMENT by DENSITY over DPF normalized}
+##Do daily settlement rates differ by density groups over time? (with normalized data from density group replicates)
+
+#Settlers by density normalized according to # of replicates in density groups
+replicate_counts <- c("1 Larvae/mL" = 8, #replicates in each density treatment
+                      "2 larvae/mL" = 4, 
+                      "5 larvae/mL" = 4, 
+                      "15-20 larvae/mL" = 4)
+
+#working df
+Settlement_dpf_normalized <- settlement_raw_long %>%
+  group_by(Densities, DPF) %>% 
+  arrange(Densities, DPF) %>% 
+  group_by(Densities) %>% 
+  mutate(Normalized_settlers = Settlers / replicate_counts[Densities], #div by # replicates
+         Density = as.factor(Density),
+         Group = as.factor(Group),
+         Settlers = as.integer(Settlers))
+
+#GAM 
+Settlement_dpf_normalized$Densities <- as.factor(Settlement_dpf_normalized$Densities)
+Settler_normalized_gam <- gam(Normalized_settlers ~ s(DPF, by = Densities) + Densities, 
+                 family = nb(), data = Settlement_dpf_normalized)
+summary(Settler_normalized_gam)
+coef(Settler_normalized_gam)
+
+#visualizing GAM outputs:
+plot(Settler_normalized_gam, shade = TRUE) #4 splines output
+abline(h = 0, lty = 'dashed') #adding line at zero
+
+#plot predictions using marginal effects
+#aggregated across density treatments
+plot_predictions(Settler_normalized_gam, condition = 'DPF', type = 'link') +
+  labs(y = "Linear predictor (link scale)", title = "Average effects of DPF", subtitle = "Aggregated across larval densities") +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_clean()
+
+#by density treatment
+plot_predictions(Settler_normalized_gam, condition = c('DPF', 'Densities'), type = 'link') +
+  labs(y = "Linear predictor (link scale)", title = "Average effects of DPF", subtitle = "Aggregated by larval density") +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177")) +
+  theme_clean()
+
+#plotting GAM effect on response scale
+#aggregated across larval densities
+plot_predictions(Settler_normalized_gam, condition = 'DPF', type = 'response') +
+  labs(y = "Expected response", title = "Average smooth effect of DPF on Settlement",
+       subtitle = "Aggregated across all larval densities") +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_classic2()
+
+#by density treatment (without obvs)
+plot_predictions(Settler_normalized_gam, condition = c('DPF', 'Densities'), type = 'response') +
+  labs(y = "Expected response", title = "Expected effect of DPF on settlement",
+       subtitle = "Aggregated by larval density") +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#plot with regular observations on a smooth curve
+ggplot(Settlement_dpf_normalized, aes(x = DPF, y = Normalized_settlers, 
+                                      colour = Densities)) +
+  geom_smooth(aes(fill = Densities), alpha = 0.1, size = 0.5) +
+   labs(y = "Observed response", title = "Observed effect of DPF on settlement",
+       subtitle = "Aggregated by larval density") +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177")) +
+  scale_fill_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177")) +
+  scale_x_continuous(breaks = seq(0, 150, by = 10)) +
+  coord_cartesian(ylim = c(0,40)) + 
+  theme_bw()
+
+#by density treatment WITH obvs barcoded
+plot_predictions(Settler_normalized_gam, condition = c('DPF', 'Densities'), type = 'response', points = 0.5, rug = TRUE) +
+  labs(y = "Expected response", title = "Average smooth effect of DPF on settlement",
+       subtitle = "Aggregated within larval density treatments") +
+  theme_bw()
+
+#new df for settlement prediction across DPF range for each density group
+Normalized_settlement_prediction <- Settlement_dpf_normalized %>% 
+  group_by(Densities) %>%
+  reframe(DPF = seq(min(DPF), max(DPF), length.out = 100)) 
+
+#adding the predicted fits on a response scale
+Normalized_settlement_prediction$Predicted <- predict(
+  Settler_normalized_gam, newdata = Normalized_settlement_prediction, type = "response")
+
+#plot it: GAM-predicted larval settlement trajectories by density
+ggplot(Settlement_dpf_normalized, aes(x = DPF, y = Normalized_settlers, 
+                                      color = Densities)) +
+  geom_point(alpha = 0.4) + #make actual obvs more translucent
+  geom_line(data = Normalized_settlement_prediction, #plotting GAM predictions
+            aes(x = DPF, y = Predicted, color = Densities), size = 1) +
+  labs(y = "Normalized daily settler count (observed + predicted)",
+       x = "Days post fertilization") +
+  theme_clean(base_size = 14) 
+
+#plot GAM smooths apart from graphed data
+plot(Settler_normalized_gam, pages = 1, se = TRUE, shade = TRUE)
+
+#simulating from fitted GAM
+#using linear predictor matrix Xlp
+xp <- predict.gam(Settler_normalized_gam, type = 'lpmatrix')
+dim(xp) #dimensions of prediction- 40 columns of basis functions for smooth terms in GAM
+colnames(xp) #see smooth terms of spline
+```
+
+
+
+## Survivorship from settlement to juvenilehood
+```{r plotting jitter and boxplot}
+#Density labels for nicer plots
+juvenile_settlement$Densities <- factor(
+  juvenile_settlement$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 Larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+#calculative settlement rate (#juveniles in feb 25 / #settlers in july 24)
+juvenile_settlement <- juvenile_settlement %>% group_by(Densities) %>%
+  mutate(Survival_rate = Juvenile_total / Larval_total)
+
+#mean, sd, summary statis for survival
+Survival_summary <- juvenile_settlement %>% group_by(Densities) %>%
+  summarise(mean_survival = mean(Survival_rate),
+            sd = sd(Survival_rate),
+            n = n())
+
+#summary stats labels for graph
+Survival_summary <- Survival_summary %>% mutate(label = paste0(
+      round(mean_survival * 100, 2), "% ± ",
+      round(sd * 100, 2), "%"))
+
+#horizontal jitter with error bars
+ggplot(data = juvenile_settlement, 
+       aes(x = Densities, y = Survival_rate, color = Densities)) +
+  geom_jitter(size = 2, alpha = 0.7, aes(shape = Densities)) +
+  stat_summary(fun = mean, geom = "crossbar", width = 0.2, size = 0.7,
+               color = "black", fatten = 1) +
+  geom_errorbar(data = Survival_summary, 
+                aes(x = Densities, ymin = mean_survival - sd, ymax = mean_survival + sd), 
+                width = 0.2, color = "black", inherit.aes = FALSE) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_fill_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  labs(y = "% Settlers surviving to 8 months post-settlement") +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+#geom text with summary stats if you want to add them
+#geom_text(data = Survival_summary, aes(x = Densities, y = mean_survival + sd + 0.01, label = label),inherit.aes = FALSE, size = 3.5, color = "black") +
+
+#box plot, if that's more your flavor
+ggplot(juvenile_settlement, aes(x = Densities, y = Survival_rate, fill = Densities)) +
+  geom_boxplot() +
+  stat_boxplot(geom ='errorbar', width = 0.3) +
+  geom_jitter(aes(shape = Densities)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_fill_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  theme_bw() +
+  labs(y = "% Settlers surviving to 8 months post-settlement") +
+  theme(legend.position = "none", axis.title.x = element_blank())
+```
+
+
+```{r jitter plot with point labels}
+set.seed(123) #reproducibility
+jitter_width <- 0.25 #spacing out jitters for label readability
+
+#add numeric x-position and jitter to your data so jitter points are not random
+juvenile_settlement <- juvenile_settlement %>%
+  mutate(Density_num = as.numeric(Densities),
+         jittered_x = Density_num + runif(n(), -jitter_width, jitter_width))
+
+Survival_summary <- Survival_summary %>%
+  mutate(Density_num = as.numeric(Densities))
+
+#plot
+ggplot() + 
+  geom_point(data = juvenile_settlement,
+             aes(x = jittered_x, y = Survival_rate, color = Densities, shape = Densities),
+             size = 2, alpha = 0.7) +
+  geom_text(data = juvenile_settlement, 
+            aes(x = jittered_x, y = Survival_rate, label = Group), 
+            size = 3, vjust = -1, show.legend = FALSE) +
+ stat_summary(data = juvenile_settlement, aes(x = Density_num, y = Survival_rate),
+               fun = mean, geom = "crossbar", width = 0.2, size = 0.7, 
+              color = "black", fatten = 1) +
+ geom_errorbar(data = Survival_summary, 
+               aes(x = Density_num, ymin = mean_survival - sd, ymax = mean_survival + sd),
+                width = 0.2, color = "black") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  scale_x_continuous(breaks = 1:4, labels = levels(juvenile_settlement$Densities)) +
+  labs(y = "% Settlers surviving to 8 months post-settlement") +
+  theme_classic() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+#reimport for cleaning purposes
+juvenile_settlement <- read.csv("Juvenile settlment survival.csv")
+
+ggplot(juvenile_settlement, aes(x = Settlement_survival, y = Juvenile_survival, colour = Density)) +
+  geom_point() +
+  geom_text(aes(label = Group)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_color_manual(values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  theme_classic2()
+
+#plot and colour by diet? 
+ggplot(juvenile_settlement, aes(x = Settlement_survival, y = Juvenile_survival, colour = Diet)) +
+  geom_point() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(labels = scales::percent) +
+  theme_classic2()
+```
+
+
+```{r linear regression JUVENILE and SETTLER SURVIVAL}
+Settlement_survival_lm <- lm(formula = Juvenile_survival ~ Settlement_survival, data = juvenile_settlement)
+
+Settlement_survival_lm
+summary(Settlement_survival_lm)
+sqrt(0.1136) #pearson coefficient is = 0.337046
+AIC(Settlement_survival_lm) #AIC = -163.299
+
+model.diag.metrics <- augment(Settlement_survival_lm)
+head(model.diag.metrics)
+
+#plotted residuals error (red) between observed values and fitted regression line
+ggplot(model.diag.metrics, aes(Settlement_survival, Juvenile_survival)) +
+  geom_point() +
+  stat_smooth(method = lm, se = FALSE) +
+  geom_segment(aes(xend = Settlement_survival, yend = .fitted), 
+               color = "red", size = 0.3) +
+  theme_classic2()
+```
+
+
+```{r pct SETTLEMENT over DPF}
+##At what DPF, will x% of larva in x density treatment be settled? (predicted)
+
+#prep data
+Settlement_percentile <- Settlement_dpf_normalized %>% group_by(Group) %>% 
+  group_by(Density) %>%
+  arrange(DPF) %>%
+  mutate(Cumulative_settlement = cumsum(Normalized_settlers),
+         Percent_settled = Cumulative_settlement / max(Cumulative_settlement, na.rm = TRUE)) %>% ungroup()
+
+#average percent settled across density treatments
+Density_settlement_percentile <- Settlement_percentile %>% group_by(Density, DPF) %>%
+  summarise(mean_percent_settled = mean(Percent_settled, na.rm = TRUE), .groups = 'drop')
+  
+#New gam with percentile data
+Settler_percentile_gam <- gam(mean_percent_settled ~ s(DPF, by = Density) + Density,
+                              family = nb(), data = Density_settlement_percentile)
+summary(Settler_percentile_gam)
+coef(Settler_percentile_gam)
+
+#using gam to find the DPF at x% cumulative settlement
+##generate predicted values from the GAM across DPF
+
+#prediction grid, vary by 0.1 per day
+pred_grid <- expand.grid(DPF = seq(min(settlement_raw_long$DPF),
+                                   max(settlement_raw_long$DPF), by = 0.1),
+                         Density = unique(Density_settlement_percentile$Density))
+
+#predict values in prediction grid
+pred_grid$Predicted_percent <- predict(Settler_percentile_gam, 
+                                       newdata = pred_grid, type = "response")
+
+#function, getting DPF at threshold
+get_dpf_at_threshold <- function(df, threshold) {
+  df %>% group_by(Density) %>%
+    dplyr::filter(Predicted_percent >= threshold) %>%
+    slice_min(DPF, n = 1) %>%
+    mutate(Percentile = paste0(threshold * 100, "%")) %>%
+    dplyr::select(Density, Percentile, DPF)
+}
+
+#retrieve the DPF for each percentile we want, i'm choosing 25%, 50%, 75%, and 90%
+percentiles <- bind_rows(get_dpf_at_threshold(pred_grid, 0.25),
+  get_dpf_at_threshold(pred_grid, 0.5),
+  get_dpf_at_threshold(pred_grid, 0.9),
+  get_dpf_at_threshold(pred_grid, 1.0))
+
+print(percentiles) #retrieving DPF where density x will be at x%
+
+percentiles$Percentile <- factor(percentiles$Percentile,
+                                 levels = c("25%", "50%", "90%", "100%"))
+
+#plot predictions with estimated DPF 
+ggplot(pred_grid, aes(x = DPF, y = Predicted_percent, colour = Density)) +
+  geom_line() +
+  geom_vline(data = percentiles, aes(xintercept = DPF, colour = Density), 
+             linetype = "dashed") +
+  facet_wrap(~ Percentile, nrow = 2, ncol = 2) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values = c("#92fe6a", "#30d5c8", "#c0c0ff", "#f07177")) +
+  labs(y = "Predicted Settlement (%)", x = "Days Post Fertilization (DPF)") +
+  theme_bw()
+```
+
+
+
+
+```{r stat anal for all that stuff}
+## Did the larval density impact the survival of new settlers to juveniles 8 months post-settlement? 
+juvenile_settlement$Densities <- factor(
+  juvenile_settlement$Density, 
+  levels = c("1larva/ml", "2larva/ml", "5then2larva/ml", "Bucket"),
+  labels = c("1 Larvae/mL", "2 larvae/mL", "5 larvae/mL", "15-20 larvae/mL"))
+
+#mean, sd, summary stats for survival for graph below :)
+Survival_summary <- juvenile_settlement %>% group_by(Densities) %>%
+  summarise(mean_survival = mean(Juvenile_survival),
+            sd = sd(Juvenile_survival),
+            n = n())
+
+#visually checking the differences in mean survival %
+ggplot(Survival_summary, aes(x = Densities, y = mean_survival, group = 1)) +
+  geom_line() +
+  geom_point() +
+   geom_errorbar(width = 0.1, colour = "red", 
+                aes(ymin = mean_survival - sd, ymax = mean_survival + sd)) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Larval Density", y = "Mean % survival to juvenile-hood") +
+  theme_classic2()
+
+#descriptive stats
+by(juvenile_settlement$Juvenile_survival, juvenile_settlement$Densities, stat.desc)
+
+#checking variances
+leveneTest(juvenile_settlement$Juvenile_survival, juvenile_settlement$Densities, center = median) #appropriate, p = 0.2
+
+#checking normality
+ggplot(juvenile_settlement, aes(sample = Juvenile_survival)) +
+     geom_qq() +
+     geom_qq_line() +
+     facet_wrap(~Densities, scales = "free_y")
+shapiro.test(juvenile_settlement$Juvenile_survival) #p = <0.01, overall NON NORMAL
+
+#shapiro.test by group
+test <- juvenile_settlement %>% dplyr::select(Density, Juvenile_survival) %>%
+  filter(Density == "1larva/ml")
+shapiro.test(test$Juvenile_survival) #1 larva/ml p = 0.29
+
+test <- juvenile_settlement %>% dplyr::select(Density, Juvenile_survival) %>%
+  filter(Density == "2larva/ml")
+shapiro.test(test$Juvenile_survival) #2 larva/ml p = 0.7873
+
+test <- juvenile_settlement %>% dplyr::select(Density, Juvenile_survival) %>%
+  filter(Density == "5then2larva/ml")
+shapiro.test(test$Juvenile_survival) #5 then 2 larva/ml p = 0.5533
+
+test <- juvenile_settlement %>% dplyr::select(Density, Juvenile_survival) %>%
+  filter(Density == "Bucket")
+shapiro.test(test$Juvenile_survival) #bucket p = 0.3371
+##3/4 appropriate, between group non appropriate, proceeding with both KW and aNOVa to be robust
+
+##KW
+#kruskal-wallis 
+Settlement_survival_kruskal <- kruskal.test(Juvenile_survival ~ Densities, data = juvenile_settlement)
+Settlement_survival_kruskal #p = 0.747
+
+#post-hoc tests
+Settlement_survival_kw_posthoc <- dunn_test(data = juvenile_settlement, Juvenile_survival ~ Densities, p.adjust.method = "bonferroni")
+Settlement_survival_kw_posthoc
+Settlement_survival_kw_posthoc <- Settlement_survival_kw_posthoc %>% arrange(p.adj)
+Settlement_survival_kw_posthoc <- Settlement_survival_kw_posthoc %>% add_xy_position(x = "Density")
+
+
+
+ggboxplot(juvenile_settlement, x = "Densities", y = "Juvenile_survival", color = "black") +
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) + 
+  stat_pvalue_manual(Settlement_survival_kw_posthoc, label = "p.adj.signif", 
+                     hide.ns = TRUE) +
+  stat_boxplot(geom ='errorbar', width = 0.2) +
+  stat_compare_means(label.y = 0.021, label.x = "1 Larvae/mL") +
+  labs(x = "Larval density", y = "Larvae surviving to 8-months post-settlement (%)") +
+  coord_cartesian(ylim = c(0, 0.021)) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#68ebff", "#936bff", "#d4646c")) +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank()) 
+
+#ANOVA
+Settlement_survival_aov <- aov(Juvenile_survival ~ Densities, data = juvenile_settlement)
+summary(Settlement_survival_aov) #p = 0.562
+plot(Settlement_survival_aov)
+
+#robust anova
+t1way(Juvenile_survival ~ Densities, data = juvenile_settlement) #default 20%
+##p = 0.0102
+t1way(Juvenile_survival ~ Densities, data = juvenile_settlement, tr = .1) #trim only 10%
+##p = 0.005
+med1way(Juvenile_survival ~ Densities, data = juvenile_settlement)
+##p = 0.008
+
+#post-hoc tests
+Settlement_survival_posthoc <- Settlement_survival_aov %>% tukey_hsd() #tukey's test
+Settlement_survival_posthoc #view results, of course bucket and 1larva are signf....
+
+#work flow for publication-ready plot
+Settlement_survival_posthoc <- Settlement_survival_posthoc %>% arrange(p.adj) #arrange
+Settlement_survival_posthoc <- add_xy_position(test = Settlement_survival_posthoc,
+  data = juvenile_settlement %>% as_tibble(.name_repair = "unique"),  #unique column names
+  formula = Juvenile_survival ~ Densities, fun = "mean", x = "Densities")
+
+#factor levels in the order used in the plot
+x_levels <- levels(factor(juvenile_settlement$Densities))
+
+#vector to convert group names to x-axis positions
+x_map <- setNames(seq_along(x_levels), x_levels)
+
+#map to assign numeric values to xmin and xmax
+Settlement_survival_posthoc <- Settlement_survival_posthoc %>%
+  mutate(xmin = x_map[group1], xmax = x_map[group2])
+
+#adjusting y.position to fit the signf brackets
+Settlement_survival_posthoc <- Settlement_survival_posthoc %>% 
+  mutate(y.position = y.position)
+Settlement_survival_posthoc$y.position[1] <- 0.30 #specific y position of 2nd signf bracket
+
+#this plot took so long to trouble shoot.... genuinely... so long... its a MIRACLE it works
+ggboxplot(juvenile_settlement, x = "Densities", y = "Juvenile_survival", 
+          color = "black") + 
+  geom_jitter(aes(colour = Densities, shape = Densities), size = 2) +
+  stat_boxplot(geom ='errorbar', width = 0.2) +
+  stat_pvalue_manual(Settlement_survival_posthoc, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(method = "anova", label.y = 0.02, label.x = "1 Larvae/mL") +
+  labs(x = "Larval density", y = "% Larvae surviving to settlement") +
+  coord_cartesian(ylim = c(0, 0.02)) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("#92fe6a", "#68ebff", "#936bff", "#d4646c")) +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+report(Settlement_survival_aov)
+```
+A one-way ANOVA was performed to compare the effect of Density on cumulative larval settlement.A one-way ANOVA revealed that there was NOT a statistically significant difference in cumulative settlement of larvae between at least two groups (F(3, 16) = 2.97, p = 0.063)). Tukey’s HSD Test for multiple comparisons found that the mean value of Length was no statistically significantly difference between or within any of the density groups. 
+
+
+## Larval Growth -- from ImageJ photos
+```{r larval growth}
+#first pass visualization
+plot(data = larval_growth, Size ~ DPF)
+
+#ordering densities
+larval_growth$Density <- 
+  factor(larval_growth$Density, levels = c("1 larvae/mL",
+                                           "2 larvae/mL",
+                                           "5 larvae/mL",
+                                           "15-20 larvae/mL"))
+
+#working df
+Larval_growth <- larval_growth %>% arrange(desc(Density)) %>%
+  group_by(DPF, Density) %>%
+  summarise(mean_size = mean(Size))
+
+#first pass plot
+ggplot(Larval_growth, aes(x = DPF, y = mean_size, colour = Density)) +
+  geom_point() +
+  geom_line() +
+  labs(y= "Average size (µm)", x = "Days post fertilization (DPF)") +
+  theme_clean()
+
+```
+
+```{r larval growth POSTER PLOT}
+
+Larval_growth <- Larval_growth %>% filter(!DPF == 42)
+
+larval_growth_poster <- 
+  ggplot(Larval_growth, aes(x = DPF, y = mean_size, colour = Density)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  labs(y= "Average size (µm)", x = "Days post fertilization (DPF)",
+       colour = "Larval Density") +
+  theme_classic() +
+  theme(legend.position = 'top')
+
+ggsave('larval_growth.png', larval_growth_poster, bg='transparent')
+```
+
+```{r}
+Larval_growth <- Larval_growth %>% 
+  filter(DPF != 42)
+
+larval_growth_poster <- 
+  ggplot(Larval_growth, aes(x = DPF, y = mean_size, colour = Density)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  labs(
+    y = "Average size (µm)",
+    x = "Days post fertilization (DPF)",
+    colour = "Larval Density"
+  ) +
+  theme(
+    # transparent backgrounds
+    panel.background = element_rect(fill = "transparent", colour = NA),
+    plot.background  = element_rect(fill = "transparent", colour = NA),
+    legend.background = element_rect(fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent"),
+
+    # no gridlines
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+
+    # white text everywhere
+    text = element_text(color = "white"),
+    axis.text = element_text(color = "white"),
+    axis.title = element_text(color = "white"),
+    legend.text = element_text(color = "white"),
+    legend.title = element_text(color = "white"),
+
+    # white axes and ticks
+    axis.line = element_line(color = "white"),
+    axis.ticks = element_line(color = "white"),
+
+    legend.position = "top"
+  )
+
+ggsave(
+  filename = "larval_growth_transparent.png",
+  plot = larval_growth_poster,
+  bg = "transparent",
+  dpi = 300
+)
+```
+

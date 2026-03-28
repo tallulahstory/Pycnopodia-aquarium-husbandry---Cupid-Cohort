@@ -127,6 +127,10 @@ Larval_growth <- larval_growth %>% arrange(desc(Density)) %>%
   group_by(DPF, Density) %>%
   summarise(mean_size = mean(Size))
 
+#mean size at 47 dpf
+Larval_growth %>%
+  filter(DPF == 47) 
+
 #first pass plot
 ggplot(Larval_growth, aes(x = DPF, y = mean_size, colour = Density)) +
   geom_point() +
@@ -147,7 +151,7 @@ Figure_2 <- Larval_growth %>% filter(!DPF == 42) %>%
   theme_bw() +
   theme(legend.position = 'top')
 
-ggsave('Figure 2.png', Figure_2, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 2.png', Figure_2, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 ```
 
 
@@ -199,7 +203,7 @@ Figure_4a <- ggplot(Density_settlement_normalized,
   theme_bw() +
   theme(legend.position = 'none')
 
-ggsave('Figure 4a.png', Figure_4a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 4a.png', Figure_4a, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 ```
 
 ```{r GAM non normalized}
@@ -335,7 +339,7 @@ Suppfig_1 <- ggplot(Settlement_dpf_normalized, aes(x = DPF, y = Normalized_settl
   theme_bw() +
   theme(legend.position = 'top')
 
-ggsave('Supp Fig 1.png', Suppfig_1, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Supp Fig 1.png', Suppfig_1, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 
 #plot GAM smooths apart from graphed data
 plot(settler_norm_gam, pages = 1, se = TRUE, shade = TRUE)
@@ -487,11 +491,11 @@ Figure_4b <- ggplot(Norm_sum, aes(x = Density, y = Normalized_cum_sum)) +
   theme_bw() +
   theme(legend.position = "none")
 
-ggsave('Figure 4b.png', Figure_4b, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 4b.png', Figure_4b, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 
 Figure_4 <- Figure_4a + Figure_4b
 
-ggsave('Figure 4.png', Figure_4, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 4.png', Figure_4, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
 ```
 
 ```{r survivorship statistical analysis}
@@ -559,7 +563,7 @@ Figure_5 <- ggplot(survivorship, aes(x = Density, y = Survivorship)) +
   theme_bw() +
   theme(legend.position = "none")
 
-ggsave('Figure 5.png', Figure_5, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 5.png', Figure_5, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 ```
 
 ## Juvenile survival/settlement data and diffs in growth
@@ -635,7 +639,7 @@ Figure_6 <- ggplot(juvenile_settlement, aes(x = Density, y = Juv_survival_rate))
        x = "Larval Density") +
   theme(legend.position = "none")
 
-ggsave('Figure 6.png', Figure_6, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 6.png', Figure_6, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 ```
 
 ## Larval density and juvenile weight
@@ -760,7 +764,7 @@ Suppfig_2b <- ggplot(Density_weight_flip_no_outliers, aes(x = Density, y = Weigh
   theme_bw() +
   theme(legend.position = "none")
 
-ggsave('Supp fig 2b.png', Suppfig_2b, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Supp fig 2b.png', Suppfig_2b, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 ```
 
 ## Larval density and juvenile length 
@@ -876,11 +880,11 @@ Suppfig_2a <- ggplot(Density_size, aes(x = Density, y = Length_mm)) +
   theme_bw() +
   theme(legend.position = "none")
 
-ggsave('Supp fig 2a.png', Suppfig_2a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Supp fig 2a.png', Suppfig_2a, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 
 Suppfig_2 <- Suppfig_2a + Suppfig_2b
 
-ggsave('Supp fig 2.png', Suppfig_2, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+#ggsave('Supp fig 2.png', Suppfig_2, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
 ```
 
 ## Larval density and juvenile flip time
@@ -954,12 +958,42 @@ df_ph
 #arrange by adjusted p-value for plotting
 df_ph <- df_ph %>% arrange(p.adj)
 df_ph <- df_ph %>% add_xy_position(x = "Density")
+
+#WITH outlier analysis
+#checking assumption of homogenity for testing
+leveneTest(Density_flip$Flip_time_seconds, 
+           Density_flip$Density, center = median) #appropriate, p = 0.45
+
+#shapiro test
+Density_flip %>% group_by(Density) %>%
+  shapiro_test(Flip_time_seconds) #all groups non-appropriate, p < 0.05
+
+#visualization of variation
+ggqqplot(Density_flip, "Flip_time_seconds") +
+  facet_grid(~Density) +
+  theme_bw() 
+
+#Kruskal-walis non-parametric alternative to ANOVA
+df_kw_o <- Density_flip %>%
+  ungroup() %>%
+  kruskal_test(Flip_time ~ Density)
+df_kw_o #p = 0.296
+
+#Post-hoc testing
+df_ph_o <- Density_flip %>%
+  ungroup() %>% 
+  dunn_test(Flip_time_seconds ~ Density, p.adjust.method = "bonferroni")
+df_ph_o
+
+#arrange by adjusted p-value for plotting
+df_ph_o <- df_ph_o %>% arrange(p.adj)
+df_ph_o <- df_ph_o %>% add_xy_position(x = "Density")
 ```
 
 *plotting*
 ```{r plotting}
 #box plot, removed extreme outliers post outlier analysis
-Figure_7a <- ggplot(Density_flip_no_outliers, aes(x = Density, y = Flip_time)) +
+Figure_7a_no <- ggplot(Density_flip_no_outliers, aes(x = Density, y = Flip_time)) +
   stat_boxplot(geom = 'errorbar', width = 0.2) +
   geom_boxplot() +
   geom_jitter(aes(colour = Density, shape = Density), size = 2) +
@@ -969,18 +1003,20 @@ Figure_7a <- ggplot(Density_flip_no_outliers, aes(x = Density, y = Flip_time)) +
   theme_bw() +
   theme(legend.position = "none")
 
-ggsave('Figure 7a.png', Figure_7a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 7a no outliers.png', Figure_7a_no, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 
 #plot (with outliers)
-ggplot(Density_flip, aes(x = Density, y = Flip_time)) +
+Figure_7a_out <- ggplot(Density_flip, aes(x = Density, y = Flip_time)) +
   stat_boxplot(geom = 'errorbar', width = 0.2) +
   geom_boxplot() +
   geom_jitter(aes(colour = Density, shape = Density), size = 2) +
-  labs(x="Larval density (larvae/mL)", y="Flip time") +
+  labs(x="Larval density", y="Flip time") +
   scale_shape_manual(values = c(15, 16, 17, 18)) +
   scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
   theme_bw() +
   theme(legend.position = "none")
+
+#ggsave('Figure 7a with outliers.png', Figure_7a_out, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 
 #plot with stats
 ggboxplot(Density_flip_no_outliers, x = "Density", y = "Flip_time", outliers = FALSE) + 
@@ -988,6 +1024,18 @@ ggboxplot(Density_flip_no_outliers, x = "Density", y = "Flip_time", outliers = F
   stat_boxplot(geom = 'errorbar', width = 0.2) +
   stat_pvalue_manual(df_ph, label = "p.adj.signif", hide.ns = TRUE) +
   stat_compare_means(label.y = 1270, label.x = "2 larvae/mL") +
+  labs(x = "Larval Density", y = "Flip Time") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none", axis.title.x = element_blank())
+
+#with stats with outliers
+ggboxplot(Density_flip, x = "Density", y = "Flip_time", outliers = FALSE) + 
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  stat_pvalue_manual(df_ph_o, label = "p.adj.signif", hide.ns = TRUE) +
+  stat_compare_means(label.y = 1600, label.x = "2 larvae/mL") +
   labs(x = "Larval Density", y = "Flip Time") +
   scale_shape_manual(values = c(15, 16, 17, 18)) +
   scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
@@ -1066,12 +1114,15 @@ slr_density_o <- lm(Flip_time_seconds ~ Length_mm:`Density_2 larvae/mL` +
                                       Length_mm:`Density_15-20 larvae/mL`,
                   data = dv_o)
 summary(slr_density_o) #ns, overall F test p = 0.188
+
+#compare models
+anova(slr_density_o, slr_o)
 ```
 
 *plotting*
 ```{r plotting}
 #plot with lm line
-Figure_7b <- ggplot(Density_size_flip_no_outliers, aes(x = Length_mm, y = Flip_time)) +
+Figure_7b_no <- ggplot(Density_size_flip_no_outliers, aes(x = Length_mm, y = Flip_time)) +
   geom_smooth(data = Density_size_flip_no_outliers,
               method = lm, colour = "black", se = TRUE) +
   geom_point(aes(shape = Density, colour = Density), size = 2) +
@@ -1084,8 +1135,10 @@ Figure_7b <- ggplot(Density_size_flip_no_outliers, aes(x = Length_mm, y = Flip_t
   theme_bw() +
   theme(legend.position = 'none')
 
+#ggsave('Figure 7b no outliers.png', Figure_7b_no, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+
 #combine figure 7a and 7b
-Figure_7a <- ggplot(Density_flip_no_outliers, aes(x = Density, y = Flip_time)) +
+Figure_7a_no <- ggplot(Density_flip_no_outliers, aes(x = Density, y = Flip_time)) +
   stat_boxplot(geom = 'errorbar', width = 0.2) +
   geom_boxplot() +
   geom_jitter(aes(colour = Density, shape = Density), size = 2) +
@@ -1095,9 +1148,41 @@ Figure_7a <- ggplot(Density_flip_no_outliers, aes(x = Density, y = Flip_time)) +
   theme_bw() +
   theme(legend.position = "none")
 
-Figure_7 <- Figure_7a + Figure_7b
+Figure_7_no <- Figure_7a_no + Figure_7b_no
 
-ggsave('Figure 7.png', Figure_7, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 7 no outliers.png', Figure_7_no, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+
+#same as above, but graphs INCLUDING outliers
+#plot with lm line
+Figure_7b_out <- ggplot(Density_size_flip, aes(x = Length_mm, y = Flip_time)) +
+  geom_smooth(data = Density_size_flip,
+              method = lm, colour = "black", se = TRUE) +
+  geom_point(aes(shape = Density, colour = Density), size = 2) +
+  scale_shape_manual(values = c(15, 16, 17, 18),
+                     name = "Larval density") +
+  scale_color_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77"),
+                     name = "Larval density") +
+  labs(x = "Length (mm)",
+       y = "Flip time", subtitle = "(B)") +
+  theme_bw() +
+  theme(legend.position = 'none')
+
+#ggsave('Figure 7b with outliers.png', Figure_7b_out, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+
+#combine figure 7a and 7b
+Figure_7a_out <- ggplot(Density_flip, aes(x = Density, y = Flip_time)) +
+  stat_boxplot(geom = 'errorbar', width = 0.2) +
+  geom_boxplot() +
+  geom_jitter(aes(colour = Density, shape = Density), size = 2) +
+  labs(x = "Larval density", y = "Flip time", subtitle = "(A)") +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_colour_manual(values = c("#006b3c", "#D2BAAD", "#9F8FAC", "#f3be77")) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+Figure_7_out <- Figure_7a_out + Figure_7b_out
+
+#ggsave('Figure 7 with outliers.png', Figure_7_out, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
 ```
 
 ## Specimen models
@@ -1192,7 +1277,7 @@ Figure_8a <- ggplot(specimens, aes(x = Length_cm, y = Arm_count)) +
   theme_bw() +
   theme(legend.position = 'none')
 
-ggsave('Figure 8a.png', Figure_8a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 8a.png', Figure_8a, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 ```
 
 *allometric modelling*
@@ -1316,11 +1401,11 @@ Figure_8b <- ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg,
   theme_bw() +
   theme(legend.position = "none")
 
-ggsave('Figure 8b.png', Figure_8b, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 8b.png', Figure_8b, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 
 Figure_8 <- Figure_8a + Figure_8b
 
-ggsave('Figure 8.png', Figure_8, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
+#ggsave('Figure 8.png', Figure_8, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Figures", width = 10, height = 5, units = c("in"), dpi = 300)
 
 #non linear model, no text
 ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg, 
@@ -1378,6 +1463,38 @@ b_plot <- ggplot(specimens_alive, aes(x = Length_cm, y = Weight_kg,
   theme(legend.position = "none")
 
 a_plot / b_plot
+```
+
+## Juvenile arms and weight
+
+```{r plotting}
+#visualization df
+Weight_arms <- fitness %>% 
+  dplyr::select(Group, Individual, Density, Weight_g, Arm_count) %>%
+  drop_na(Density, Weight_g)
+
+#cupid cohort
+Suppfig_3_cupid <- ggplot(Weight_arms, aes(y = Weight_g, x = Arm_count)) +
+  geom_point() +
+  geom_smooth(method = "glm", method.args = list(family = gaussian(link = "log")),
+              se = TRUE, colour = "red") +
+  labs(x = "Number of arms", y = "Weight (g)") +
+  theme_bw()
+
+#ggsave('Supp fig 3 cupid.png', Suppfig_3_cupid, path = "/Users/loganstory/Desktop/SSI/Data/Cupid Cohort/Supplementary Figures", width = 7, height = 5, units = c("in"), dpi = 300)
+
+#specimens
+Suppfig_3_specimens <- ggplot(specimens_alive, aes(y = Weight_g, x = Arm_count)) +
+  geom_point(aes(colour = Specimen_type)) +
+  geom_smooth(method = "glm", method.args = list(family = gaussian(link = "log")),
+              se = TRUE, colour = "red") +
+  scale_colour_manual(values = c("#8da0cb", "#fc8d62")) +
+  scale_shape_manual(values = c(15, 17)) +
+  labs(x = "Number of arms", y = "Weight (g)", colour = "Specimen type") +
+  theme_bw() +
+  theme(legend.position = 'bottom')
+
+ggsave('Supp fig 3 specimens.png', Suppfig_3_specimens, path = "/Users/loganstory/Desktop/Research/SSI/Data/Cupid Cohort/Supplementary Figures", width = 7, height = 5, units = c("in"), dpi = 300)
 ```
 
 ## Juvenile diet and weight
